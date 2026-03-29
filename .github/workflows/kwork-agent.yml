@@ -19,6 +19,14 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
+      - name: Restore processed IDs cache
+        uses: actions/cache@v4
+        with:
+          path: processed_ids.json
+          key: processed-ids-${{ github.run_id }}
+          restore-keys: |
+            processed-ids-
+
       - name: Install dependencies
         run: npm ci
 
@@ -32,3 +40,10 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           KWORK_SEARCH_URL: ${{ secrets.KWORK_SEARCH_URL }}
         run: npx ts-node index.ts
+
+      - name: Save processed IDs cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: processed_ids.json
+          key: processed-ids-${{ github.run_id }}
