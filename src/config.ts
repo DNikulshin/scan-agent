@@ -97,6 +97,19 @@ export const config = {
     },
   },
 
+  /** Freelance.ru */
+  freelanceru: {
+    enabled: process.env.FREELANCERU_ENABLED === 'true',
+    url: process.env.FREELANCERU_SEARCH_URL ?? 'https://freelance.ru/project/search/pro/razrabotka-sajtov/',
+    selectors: {
+      card: '.project, .project-item, [class*="project"]',
+      title: '.project__title a, .project-item__title a, h3 a',
+      description: '.project__desc, .project-item__desc',
+      price: '.project__price, .project-item__price, .cost',
+      offersText: '.project__offers, .project-item__offers, .count',
+    },
+  },
+
   /** Push notifications */
   push: {
     vapid: {
