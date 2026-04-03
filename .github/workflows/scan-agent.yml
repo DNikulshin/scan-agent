@@ -1,0 +1,53 @@
+name: ScanAgent
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # каждые 30 минут
+  workflow_dispatch:         # ручной запуск из GitHub UI
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Restore DB cache
+        uses: actions/cache@v4
+        with:
+          path: agent.db
+          key: agent-db-${{ github.run_id }}
+          restore-keys: |
+            agent-db-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Run agent
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KWORK_SEARCH_URL: ${{ secrets.KWORK_SEARCH_URL }}
+          FL_ENABLED: ${{ secrets.FL_ENABLED }}
+          FL_SEARCH_URL: ${{ secrets.FL_SEARCH_URL }}
+          FREELANCERU_ENABLED: ${{ secrets.FREELANCERU_ENABLED }}
+          FREELANCERU_SEARCH_URL: ${{ secrets.FREELANCERU_SEARCH_URL }}
+        run: npx tsx src/index.ts
+
+      - name: Save DB cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: agent.db
+          key: agent-db-${{ github.run_id }}
