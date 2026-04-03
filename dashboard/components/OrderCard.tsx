@@ -44,21 +44,27 @@ export function OrderCard({ order }: { order: Order }) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex flex-col gap-1 min-w-0">
           <a
-            href={order.link}
+            href={typeof order.link === 'string' ? order.link : '#'}
             target="_blank"
             rel="noopener noreferrer"
             className="font-semibold text-white hover:text-blue-400 transition-colors leading-tight"
           >
-            {order.title}
+            {typeof order.title === 'string' ? order.title : 'Заголовок неизвестен'}
           </a>
           <div className="flex flex-wrap items-center gap-2 text-sm text-gray-400">
-            <span>{SOURCE_EMOJI[order.source] ?? '⚪'} {order.source}</span>
+            <span>{SOURCE_EMOJI[typeof order.source === 'string' ? order.source : ''] ?? '⚪'} {typeof order.source === 'string' ? order.source : 'Источник неизвестен'}</span>
             <span>·</span>
-            <span>💰 {order.price || 'Договорная'}</span>
+            <span>💰 {typeof order.price === 'string' ? order.price : 'Цена неизвестна'}</span>
             <span>·</span>
             <span>📊 {typeof order.offers_count === 'number' ? order.offers_count : 0} откликов</span>
             <span>·</span>
-            <span>{new Date(order.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            <span>{(() => {
+              try {
+                return new Date(order.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+              } catch {
+                return 'Дата неизвестна';
+              }
+            })()}</span>
           </div>
         </div>
         <div className="flex flex-col items-end gap-2 shrink-0">
