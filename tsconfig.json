@@ -1,13 +1,15 @@
 {
   "compilerOptions": {
-    "target": "ES2020",
+    "target": "ES2022",
     "module": "commonjs",
-    "strict": false,
+    "moduleResolution": "node",
+    "strict": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "outDir": "./dist",
-    "types": [
-      "node"
-    ]
-  }
+    "rootDir": "./src",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"]
 }
