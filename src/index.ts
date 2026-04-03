@@ -3,8 +3,7 @@ import { Storage } from './core/storage';
 import { getTrashReason } from './core/filter';
 import { analyzeOrder } from './core/analyzer';
 import { KworkParser, FlParser, FreelanceruParser } from './parsers';
-import { TelegramNotifier } from './notifiers/telegram';
-import { SupabaseNotifier } from './notifiers/supabase';
+import { PushNotifier } from './notifiers/push';
 import { logger } from './utils/logger';
 import type { Parser } from './types';
 
@@ -24,6 +23,7 @@ async function run(): Promise<void> {
   const storage = new Storage();
   const telegram = new TelegramNotifier(storage);
   const supabase = new SupabaseNotifier();
+  const push = new PushNotifier();
 
   // Запуск listener для inline-кнопок (polling)
   telegram.startCallbackListener();
@@ -76,6 +76,13 @@ async function run(): Promise<void> {
           await telegram.send(scored);
           sent = true;
           totalSent++;
+          // Отправить push-уведомление
+          await push.sendToAll({
+            title: `Новый заказ: ${scored.order.title}`,
+            body: `Оценка: ${scored.score.score}/10`,
+            icon: '/icons/icon-192.svg',
+            data: { orderId: scored.order.id },
+          });
         } catch (err) {
           logger.error({ err, orderId: order.id }, 'Ошибка отправки в Telegram');
         }

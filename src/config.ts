@@ -97,16 +97,12 @@ export const config = {
     },
   },
 
-  /** Freelance.ru */
-  freelanceru: {
-    enabled: process.env.FREELANCERU_ENABLED === 'true',
-    url: process.env.FREELANCERU_SEARCH_URL ?? 'https://freelance.ru/project/search/pro/razrabotka-sajtov/',
-    selectors: {
-      card: '.project, .project-item, [class*="project"]',
-      title: '.project__title a, .project-item__title a, h3 a',
-      description: '.project__desc, .project-item__desc',
-      price: '.project__price, .project-item__price, .cost',
-      offersText: '.project__offers, .project-item__offers, .count',
+  /** Push notifications */
+  push: {
+    vapid: {
+      subject: 'mailto:your-email@example.com', // Замените на ваш email
+      publicKey: process.env.VAPID_PUBLIC_KEY ?? '',
+      privateKey: process.env.VAPID_PRIVATE_KEY ?? '',
     },
   },
 } as const;
@@ -117,6 +113,8 @@ export function validateConfig(): void {
   if (!config.openrouter.apiKey) missing.push('OPENROUTER_API_KEY');
   if (!config.telegram.botToken) missing.push('TELEGRAM_BOT_TOKEN');
   if (!config.telegram.chatId) missing.push('TELEGRAM_CHAT_ID');
+  if (!config.push.vapid.publicKey) missing.push('VAPID_PUBLIC_KEY');
+  if (!config.push.vapid.privateKey) missing.push('VAPID_PRIVATE_KEY');
 
   if (missing.length > 0) {
     throw new Error(

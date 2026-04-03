@@ -19,6 +19,15 @@ CREATE TABLE IF NOT EXISTS orders (
   UNIQUE (order_id, source)
 );
 
+-- Таблица для push subscriptions
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id          UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  endpoint    TEXT NOT NULL UNIQUE,
+  p256dh      TEXT NOT NULL,
+  auth        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Индексы для быстрой фильтрации в дашборде
 CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_score      ON orders(score DESC);
