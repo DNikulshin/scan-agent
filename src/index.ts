@@ -3,6 +3,8 @@ import { Storage } from './core/storage';
 import { getTrashReason } from './core/filter';
 import { analyzeOrder } from './core/analyzer';
 import { KworkParser, FlParser, FreelanceruParser } from './parsers';
+import { TelegramNotifier } from './notifiers/telegram';
+import { SupabaseNotifier } from './notifiers/supabase';
 import { PushNotifier } from './notifiers/push';
 import { logger } from './utils/logger';
 import type { Parser } from './types';
