@@ -31,5 +31,20 @@ export default withPWA({
   disable: process.env.NODE_ENV === "development",
   workboxOptions: {
     disableDevLogs: true,
+    runtimeCaching: [
+      {
+        urlPattern: /^https?.*/,
+        handler: 'NetworkFirst',
+        options: {
+          cacheName: 'offlineCache',
+          expiration: {
+            maxEntries: 200,
+          },
+        },
+      },
+    ],
+    navigateFallback: '/offline',
+    navigateFallbackDenylist: [/^\/_next\/static\/.*/, /^\/api\/.*/],
+    importScripts: ['/custom-sw.js'],
   },
 })(nextConfig);

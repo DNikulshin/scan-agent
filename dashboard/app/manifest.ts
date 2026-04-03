@@ -24,5 +24,15 @@ export default function manifest(): MetadataRoute.Manifest {
         purpose: 'any',
       },
     ],
+    categories: ['business', 'productivity'],
+    shortcuts: [
+      {
+        name: 'Новые заказы',
+        short_name: 'Новые',
+        description: 'Посмотреть новые заказы',
+        url: '/?status=new',
+        icons: [{ src: '/icons/icon-192.svg', sizes: '192x192' }],
+      },
+    ],
   };
 }
