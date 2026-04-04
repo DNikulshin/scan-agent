@@ -112,6 +112,20 @@ async function run(): Promise<void> {
       }
     }
   } finally {
+    // Напоминания о заказах, которые не рассмотрели > 2 часов назад
+    const unreminded = storage.getUnremindedOrders(config.filter.minScore, 2);
+    for (const order of unreminded) {
+      try {
+        await telegram.sendReminder(order);
+        storage.markReminded(order.order_id, order.source);
+      } catch (err) {
+        logger.error({ err, orderId: order.order_id }, 'Ошибка отправки напоминания');
+      }
+    }
+    if (unreminded.length > 0) {
+      logger.info({ count: unreminded.length }, 'Напоминания отправлены');
+    }
+
     logger.info({ totalNew, totalSent, dbSize: storage.count }, 'Цикл завершён');
     // Не закрываем storage и polling — они нужны для callback-кнопок.
     // При одноразовом запуске через cron — даём 30 сек на обработку callback,

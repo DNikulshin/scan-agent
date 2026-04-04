@@ -3,6 +3,26 @@ import path from 'path';
 
 import { logger } from '../utils/logger';
 
+export interface ReminderOrder {
+  order_id: string;
+  source: string;
+  title: string;
+  link: string;
+  score: number;
+  pitch: string;
+}
+
+export interface StatsResult {
+  today_total: number;
+  today_sent: number;
+  today_skipped: number;
+  week_total: number;
+  week_sent: number;
+  week_skipped: number;
+  week_avg_score: number | null;
+  total_count: number;
+}
+
 /**
  * SQLite-хранилище для обработанных заказов.
  *
@@ -88,6 +108,42 @@ export class Storage {
     logger.info({ orderId, source }, 'Заказ добавлен в blacklist');
   }
 
+  /** Заказы, которым нужно отправить напоминание */
+  getUnremindedOrders(minScore: number, afterHours: number = 2): ReminderOrder[] {
+    const interval = `-${afterHours} hours`;
+    return this.db.prepare(`
+      SELECT order_id, source, title, link, score, pitch
+      FROM orders
+      WHERE score >= ?
+        AND blacklisted = 0
+        AND reminded_at IS NULL
+        AND processed_at <= datetime('now', ?)
+    `).all(minScore, interval) as ReminderOrder[];
+  }
+
+  /** Помечает заказ как напомненный */
+  markReminded(orderId: string, source: string): void {
+    this.db
+      .prepare(`UPDATE orders SET reminded_at = datetime('now') WHERE order_id = ? AND source = ?`)
+      .run(orderId, source);
+  }
+
+  /** Статистика агента */
+  getStats(minScore: number): StatsResult {
+    return this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS today_total,
+        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') AND score >= ? AND blacklisted = 0 THEN 1 ELSE 0 END) AS today_sent,
+        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') AND blacklisted = 1 THEN 1 ELSE 0 END) AS today_skipped,
+        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS week_total,
+        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') AND score >= ? AND blacklisted = 0 THEN 1 ELSE 0 END) AS week_sent,
+        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') AND blacklisted = 1 THEN 1 ELSE 0 END) AS week_skipped,
+        ROUND(AVG(CASE WHEN processed_at >= datetime('now', '-7 days') AND score > 0 THEN CAST(score AS REAL) END), 1) AS week_avg_score,
+        COUNT(*) AS total_count
+      FROM orders
+    `).get(minScore, minScore) as StatsResult;
+  }
+
   /** Количество обработанных заказов */
   get count(): number {
     const row = this.db.prepare('SELECT COUNT(*) as cnt FROM orders').get() as { cnt: number };
@@ -124,11 +180,12 @@ export class Storage {
       );
       CREATE INDEX IF NOT EXISTS idx_orders_processed ON orders(processed_at);
     `);
-    // Миграция для существующих БД без колонки pitch
-    try {
-      this.db.exec(`ALTER TABLE orders ADD COLUMN pitch TEXT DEFAULT ''`);
-    } catch {
-      // Колонка уже есть — игнорируем
+    // Миграции для существующих БД
+    for (const sql of [
+      `ALTER TABLE orders ADD COLUMN pitch TEXT DEFAULT ''`,
+      `ALTER TABLE orders ADD COLUMN reminded_at TEXT DEFAULT NULL`,
+    ]) {
+      try { this.db.exec(sql); } catch { /* колонка уже есть */ }
     }
   }
 }

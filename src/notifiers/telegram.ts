@@ -1,7 +1,7 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-import type { Storage } from '../core/storage';
+import type { Storage, ReminderOrder, StatsResult } from '../core/storage';
 import type { ScoredOrder, Notifier } from '../types';
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -61,6 +61,33 @@ export class TelegramNotifier implements Notifier {
     );
   }
 
+  async sendReminder(order: ReminderOrder): Promise<void> {
+    const source = SOURCE_LABEL[order.source] ?? order.source;
+    const stars = '⭐'.repeat(Math.min(Math.round(order.score / 2), 5));
+
+    const lines = [
+      `⏰ <b>Напоминание</b> — заказ ещё не рассмотрен`,
+      ``,
+      `🔥 <b>${esc(order.title)}</b>`,
+      `${stars} Оценка: <b>${order.score}/10</b> | 🏪 ${source}`,
+    ];
+
+    if (order.pitch) {
+      lines.push(``, `✍️ <code>${esc(order.pitch)}</code>`);
+    }
+    lines.push(``, `🔗 <a href="${order.link}">${esc(order.title)}</a>`);
+
+    await this.bot.sendMessage(config.telegram.chatId, lines.join('\n'), {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: {
+        inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: `skip:${order.source}:${order.order_id}` }]],
+      },
+    });
+
+    logger.info({ orderId: order.order_id, source: order.source }, 'Напоминание отправлено в Telegram');
+  }
+
   startCallbackListener(): void {
     if (!this.storage) {
       logger.warn('Storage не передан — callback-кнопки не будут работать');
@@ -68,6 +95,16 @@ export class TelegramNotifier implements Notifier {
     }
 
     this.bot.startPolling({ restart: true });
+
+    this.bot.on('message', async (msg) => {
+      if (msg.text !== '/stats' || !this.storage) return;
+      try {
+        const stats = this.storage.getStats(config.filter.minScore);
+        await this.bot.sendMessage(config.telegram.chatId, formatStats(stats), { parse_mode: 'HTML' });
+      } catch (err) {
+        logger.error({ err }, 'Ошибка отправки статистики');
+      }
+    });
 
     this.bot.on('callback_query', async (query) => {
       const data = query.data;
@@ -104,6 +141,25 @@ export class TelegramNotifier implements Notifier {
   stopCallbackListener(): void {
     this.bot.stopPolling();
   }
+}
+
+function formatStats(s: StatsResult): string {
+  return [
+    `📊 <b>Статистика агента</b>`,
+    ``,
+    `📅 <b>Сегодня:</b>`,
+    `  • Просканировано: ${s.today_total ?? 0}`,
+    `  • Отправлено (score ≥ ${config.filter.minScore}): ${s.today_sent ?? 0}`,
+    `  • Пропущено: ${s.today_skipped ?? 0}`,
+    ``,
+    `📆 <b>За неделю:</b>`,
+    `  • Просканировано: ${s.week_total ?? 0}`,
+    `  • Отправлено: ${s.week_sent ?? 0}`,
+    `  • Пропущено: ${s.week_skipped ?? 0}`,
+    `  • Средний скор: ${s.week_avg_score ?? '—'}`,
+    ``,
+    `💾 В базе: ${s.total_count} заказов`,
+  ].join('\n');
 }
 
 /** Экранирование для HTML parse_mode: только &, <, > */
