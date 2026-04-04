@@ -28,19 +28,25 @@ export function PushNotificationManager() {
   }, []);
 
   const requestPermission = async () => {
+    console.log('Requesting notification permission...');
     if ('Notification' in window && 'serviceWorker' in navigator) {
       const result = await Notification.requestPermission();
+      console.log('Permission result:', result);
       setPermission(result);
       if (result === 'granted') {
+        console.log('Permission granted, subscribing...');
         const registration = await navigator.serviceWorker.ready;
         const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
+        console.log('VAPID public key:', vapidPublicKey ? 'present' : 'missing');
         const subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
         });
+        console.log('Subscription created:', subscription ? 'yes' : 'no');
 
         // Отправить subscription в Supabase
         try {
+          console.log('Saving to Supabase...');
           const { error } = await supabase.from('push_subscriptions').upsert({
             endpoint: subscription.endpoint,
             p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
@@ -55,6 +61,8 @@ export function PushNotificationManager() {
           console.error('Exception saving push subscription:', err);
         }
       }
+    } else {
+      console.error('Notifications or Service Worker not supported');
     }
   };
 
