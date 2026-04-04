@@ -28,6 +28,7 @@ export interface ScoredOrder {
   order: Order;
   score: ScoreResult;
   pitch: PitchResult;
+  tags?: string[];
 }
 
 /** Интерфейс парсера — каждая новая биржа реализует его */

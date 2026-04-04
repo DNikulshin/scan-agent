@@ -2,6 +2,7 @@ import { validateConfig, config } from './config';
 import { Storage } from './core/storage';
 import { getTrashReason } from './core/filter';
 import { analyzeOrder } from './core/analyzer';
+import { extractTags } from './core/tagger';
 import { KworkParser, FlParser, FreelanceruParser } from './parsers';
 import { TelegramNotifier } from './notifiers/telegram';
 import { SupabaseNotifier } from './notifiers/supabase';
@@ -72,7 +73,7 @@ async function run(): Promise<void> {
           continue;
         }
 
-        const scored = { order, score: result.score, pitch: result.pitch };
+        const scored = { order, score: result.score, pitch: result.pitch, tags: extractTags(order) };
         let sent = false;
 
         try {
@@ -105,6 +106,7 @@ async function run(): Promise<void> {
             score: result.score.score,
             link: order.link,
             pitch: `${result.pitch.hook}\n\n${result.pitch.pitch}`,
+            tags: scored.tags,
           });
         }
 

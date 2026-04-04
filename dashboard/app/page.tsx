@@ -24,6 +24,7 @@ function PageComponent() {
   const status = (searchParams.get('status') ?? 'all') as FilterStatus;
   const source = (searchParams.get('source') ?? 'all') as FilterSource;
   const minScore = parseInt(searchParams.get('minScore') ?? '0', 10);
+  const activeTag = searchParams.get('tag') ?? '';
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     applied: false,
@@ -31,7 +32,7 @@ function PageComponent() {
   });
 
   const { data: orders, isLoading, error } = useQuery({
-    queryKey: ['orders', status, source, minScore],
+    queryKey: ['orders', status, source, minScore, activeTag],
     queryFn: async () => {
       let query = supabase
         .from('orders')
@@ -85,11 +86,15 @@ function PageComponent() {
     });
   }
 
+  const filteredByTag = activeTag
+    ? orders?.filter(o => o.tags?.split(',').includes(activeTag))
+    : orders;
+
   // Группировка заказов
   const groupedOrders = {
-    new: orders?.filter(o => o.status === 'new') || [],
-    applied: orders?.filter(o => o.status === 'applied') || [],
-    skipped: orders?.filter(o => o.status === 'skipped') || [],
+    new:     filteredByTag?.filter(o => o.status === 'new')     || [],
+    applied: filteredByTag?.filter(o => o.status === 'applied') || [],
+    skipped: filteredByTag?.filter(o => o.status === 'skipped') || [],
   };
 
   if (isLoading) {
@@ -153,6 +158,35 @@ function PageComponent() {
           <option value="9">≥ 9</option>
         </select>
       </div>
+
+      {/* Tag filter */}
+      {(() => {
+        const allTags = Array.from(new Set(
+          (orders ?? []).flatMap(o => o.tags?.split(',').filter(Boolean) ?? [])
+        )).sort();
+        if (allTags.length === 0) return null;
+        return (
+          <div className="flex flex-wrap gap-2 mb-6">
+            {activeTag && (
+              <button
+                onClick={() => updateFilter('tag', 'all')}
+                className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-600 text-white"
+              >
+                ✕ {activeTag}
+              </button>
+            )}
+            {allTags.filter(t => t !== activeTag).map(tag => (
+              <button
+                key={tag}
+                onClick={() => updateFilter('tag', tag)}
+                className="px-2.5 py-1 rounded-full text-xs font-medium bg-gray-800 text-gray-400 border border-gray-700 hover:border-gray-500 hover:text-white transition-colors"
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {/* Orders */}
       <div className="space-y-6">

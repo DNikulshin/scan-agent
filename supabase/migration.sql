@@ -28,6 +28,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Колонка тегов (технологии: React, Node.js, Python и т.д.)
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS tags TEXT DEFAULT '';
+
 -- Индексы для быстрой фильтрации в дашборде
 CREATE INDEX IF NOT EXISTS idx_orders_status     ON orders(status);
 CREATE INDEX IF NOT EXISTS idx_orders_score      ON orders(score DESC);

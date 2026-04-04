@@ -39,6 +39,7 @@ export class SupabaseNotifier implements Notifier {
       reason: score.reason,
       hook: pitch.hook,
       pitch: pitch.pitch,
+      tags: (scored.tags ?? []).join(','),
       status: 'new',
     }, { onConflict: 'order_id,source' });
 

@@ -78,13 +78,14 @@ export class Storage {
     score: number;
     link: string;
     pitch?: string;
+    tags?: string[];
   }): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO orders (order_id, source, title, score, link, pitch, processed_at)
-         VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`,
+        `INSERT OR REPLACE INTO orders (order_id, source, title, score, link, pitch, tags, processed_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
       )
-      .run(params.orderId, params.source, params.title, params.score, params.link, params.pitch ?? '');
+      .run(params.orderId, params.source, params.title, params.score, params.link, params.pitch ?? '', (params.tags ?? []).join(','));
   }
 
   /** Возвращает сохранённый питч для заказа */
@@ -214,6 +215,7 @@ export class Storage {
     for (const sql of [
       `ALTER TABLE orders ADD COLUMN pitch TEXT DEFAULT ''`,
       `ALTER TABLE orders ADD COLUMN reminded_at TEXT DEFAULT NULL`,
+      `ALTER TABLE orders ADD COLUMN tags TEXT DEFAULT ''`,
     ]) {
       try { this.db.exec(sql); } catch { /* колонка уже есть */ }
     }

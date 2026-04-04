@@ -15,6 +15,7 @@ export interface Order {
   reason: string;
   hook: string;
   pitch: string;
+  tags: string;
   status: OrderStatus;
   created_at: string;
 }

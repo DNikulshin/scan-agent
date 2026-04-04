@@ -77,6 +77,20 @@ export function OrderCard({ order, onStatusUpdate }: { order: Order; onStatusUpd
         </div>
       </div>
 
+      {/* Tags */}
+      {(() => {
+        const tags = order.tags?.split(',').filter(Boolean) ?? [];
+        return tags.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {tags.map(tag => (
+              <span key={tag} className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 border border-gray-700">
+                {tag}
+              </span>
+            ))}
+          </div>
+        ) : null;
+      })()}
+
       {/* Reason */}
       <p className="text-sm text-gray-400 leading-relaxed">
         {typeof order.reason === 'string' ? order.reason : 'Причина не доступна'}
