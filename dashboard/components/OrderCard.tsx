@@ -32,9 +32,6 @@ export function OrderCard({ order, onStatusUpdate }: { order: Order; onStatusUpd
     setPending(true);
     if (onStatusUpdate) {
       onStatusUpdate(order.id, status);
-    } else {
-      // Fallback to old method if not provided
-      await updateStatus(order.id, status);
     }
     setPending(false);
   }
