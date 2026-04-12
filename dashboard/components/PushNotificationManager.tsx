@@ -3,7 +3,8 @@
 import { useEffect, useState } from 'react';
 
 export function PushNotificationManager() {
-  const [permission, setPermission] = useState<NotificationPermission>('default');
+  // null = ещё не проверили (избегаем мигания кнопки при загрузке)
+  const [permission, setPermission] = useState<NotificationPermission | null>(null);
 
   useEffect(() => {
     if ('serviceWorker' in navigator && 'PushManager' in window) {
@@ -50,18 +51,17 @@ export function PushNotificationManager() {
     }
   };
 
-  if (permission === 'default') {
-    return (
-      <button
-        onClick={requestPermission}
-        className="fixed bottom-4 right-4 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50"
-      >
-        🔔 Включить уведомления
-      </button>
-    );
-  }
+  // null = ещё не проверили; granted/denied = кнопка не нужна
+  if (permission !== 'default') return null;
 
-  return null;
+  return (
+    <button
+      onClick={requestPermission}
+      className="fixed bottom-4 right-4 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg shadow-lg z-50"
+    >
+      🔔 Включить уведомления
+    </button>
+  );
 }
 
 function urlBase64ToUint8Array(base64String: string) {

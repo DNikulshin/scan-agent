@@ -65,6 +65,23 @@ function PageComponent() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
   });
 
+  const resetStatsMutation = useMutation({
+    mutationFn: async () => {
+      const apiKey = prompt('Введите API-ключ для подтверждения сброса:');
+      if (!apiKey) return;
+      if (!confirm('Сбросить всю статистику побед/поражений? Это нельзя отменить.')) return;
+      const res = await fetch('/api/orders/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ confirm: 'RESET' }),
+      });
+      if (!res.ok) throw new Error('Неверный ключ или ошибка сервера');
+      const { updated } = await res.json();
+      alert(`Сброшено: ${updated} заказов`);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
+  });
+
   const updateFilter = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams.toString());
     if (value === 'all') {
@@ -135,6 +152,13 @@ function PageComponent() {
               {winRate !== null && (
                 <span className="text-yellow-400">📈 Win rate: <b>{winRate}%</b></span>
               )}
+              <button
+                onClick={() => resetStatsMutation.mutate()}
+                className="text-gray-600 hover:text-gray-400 text-xs ml-auto transition-colors"
+                title="Сбросить статистику"
+              >
+                🔄 Сброс
+              </button>
             </div>
           );
         })()}
