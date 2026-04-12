@@ -27,3 +27,13 @@ export async function POST(req: NextRequest) {
   );
   return NextResponse.json({ ok: true });
 }
+
+// DELETE /api/push-subscriptions — удалить устаревшую подписку
+export async function DELETE(req: NextRequest) {
+  if (!checkAuth(req)) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  const { endpoint } = await req.json();
+  await db.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+  return NextResponse.json({ ok: true });
+}
