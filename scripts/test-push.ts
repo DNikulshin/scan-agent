@@ -100,7 +100,7 @@ async function main() {
 
   console.log(`\n📊 Итог: ${ok} успешно, ${stale} устаревших удалено, ${fail} с ошибкой`);
 
-  if (stale > 0) {
+  if (ok === 0 && stale > 0) {
     console.log('\n👉 Открой браузер → https://scan.nikulshin-dev.online/ → "Включить уведомления"');
     console.log('   Затем запусти npm run test-push снова.');
   }
