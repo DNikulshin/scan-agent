@@ -16,13 +16,13 @@ npm run dev       # Run agent with pretty logs (tsx, PRETTY_LOGS=true)
 npm run build     # Compile TypeScript to dist/
 npm start         # Run compiled dist/index.js
 npm run lint      # TypeScript type-check (no emit)
-npm run test-push # Send test push to all subscribers (VPS: needs .env in /opt/home-codespaces/)
+npm run test-push # Тест push-уведомлений (на VPS: .env лежит в /opt/home-codespaces/)
 ```
 
 ### Dashboard (Next.js 16)
 ```bash
 cd dashboard
-npm run dev    # Dev server on port 3000
+npm run dev    # Dev server на порту 3000
 npm run build  # Production build
 npm run lint   # ESLint
 ```
@@ -60,7 +60,7 @@ Each parser implements the `Parser` interface from `src/types.ts` — a `fetch()
 **To add a new marketplace**: implement the `Parser` interface, add config entry in `src/config.ts`, export from `src/parsers/index.ts`.
 
 ### Dashboard (`dashboard/`)
-Next.js 16 App Router + React 19 + Tailwind CSS 4 + TanStack React Query. Data from VPS PostgreSQL (via `pg`) or Supabase. `OrderCard` shows both pitch variants with copy-on-tap. **Important**: Next.js 16 has breaking changes — read `node_modules/next/dist/docs/` before modifying frontend code.
+Next.js 16 App Router + React 19 + Tailwind CSS 4 + TanStack React Query. Data from VPS PostgreSQL (via `pg`). `OrderCard` shows both pitch variants with copy-on-tap. **Important**: Next.js 16 has breaking changes — read `node_modules/next/dist/docs/` before modifying frontend code.
 
 #### Service Worker (PWA + Push)
 `dashboard/public/sw.js` — **статичный файл, не генерируется при сборке**. Содержит:
@@ -69,50 +69,63 @@ Next.js 16 App Router + React 19 + Tailwind CSS 4 + TanStack React Query. Data f
 - Cache-first для `/_next/static/` (иммутабельные чанки)
 - Network-first для страниц с offline fallback
 
-**Почему статичный**: `@ducanh2912/next-pwa` несовместим с Next.js 16 — при сборке не генерировал `sw.js`, что ломало все push-уведомления. Пакет удалён из зависимостей. `sw.js` теперь коммитится в git и не имеет зависимостей от build-хешей.
+**Почему статичный**: `@ducanh2912/next-pwa` несовместим с Next.js 16 — при сборке не генерировал `sw.js`. Пакет удалён. `sw.js` коммитится в git, не имеет зависимостей от build-хешей.
 
-`Cache-Control: no-store` на `/sw.js` настроен в `next.config.ts` — браузер всегда берёт актуальную версию.
+`Cache-Control: no-store` на `/sw.js` настроен в `next.config.ts`.
 
-#### Push Subscriptions API
-- `GET /api/push-subscriptions` — список подписок (auth required)
-- `POST /api/push-subscriptions` — сохранить подписку из браузера
-- `DELETE /api/push-subscriptions` — удалить устаревшую подписку (auth required)
+#### Push Subscriptions
+- VAPID public key передаётся через `GET /api/vapid-public-key` (runtime), **не** через `NEXT_PUBLIC_*` (build-time). Причина: `NEXT_PUBLIC_*` в standalone Docker-сборке требует ARG на этапе build — это хрупко.
+- `PushNotificationManager` автоматически переподписывает при `permission=granted` + отсутствии подписки (например после очистки БД).
+- Push notifier (`src/notifiers/push.ts`) авто-удаляет подписки с ответом 410/404/403.
 
-Push notifier (`src/notifiers/push.ts`) автоматически удаляет подписки с ответом 410/404/403.
+#### API Routes
+- `GET/POST/DELETE /api/push-subscriptions` — управление подписками (GET/DELETE требуют `DASHBOARD_API_KEY`)
+- `GET /api/vapid-public-key` — отдаёт публичный VAPID ключ клиенту
+- `GET/POST /api/orders` — заказы
+- `POST /api/orders/pitch` — обновить выбранный pitch
 
 ## Environment Variables
 
 **Backend** (`.env` в `/opt/home-codespaces/` на VPS):
 - `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
-- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` — для push-уведомлений
-- `DASHBOARD_URL`, `DASHBOARD_API_KEY` — VPS Dashboard (основной режим)
+- `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`
+- `DASHBOARD_URL`, `DASHBOARD_API_KEY`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — опционально
 
-**Dashboard** (env в docker-compose):
-- `DATABASE_URL` — PostgreSQL (`postgresql://scan:...@postgres-scan:5432/scan_agent`)
+**Dashboard** (env в `docker-compose.yml` на VPS):
+- `DATABASE_URL` — `postgresql://scan:...@postgres-scan:5432/scan_agent`
 - `VAPID_PRIVATE_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `DASHBOARD_API_KEY`
 
 ## Деплой на VPS
 
 Проект запущен в Docker на `/opt/home-codespaces/`. Состав:
-- `caddy` — reverse proxy (80/443)
-- `dashboard` — Next.js 16, собирается из `./scan-agent/dashboard/Dockerfile`
-- `postgres-scan` — PostgreSQL 16 для dashboard
-- `webhook` — приём деплой-хуков от GitHub Actions
-- `codeserver`, `portainer`, `webssh`, `minio` — инфраструктура
+- `caddy` — reverse proxy (80/443), домен `scan.nikulshin-dev.online`
+- `dashboard` — Next.js 16, образ из GHCR (`ghcr.io/dnikulshin/scan-agent/dashboard:latest`)
+- `postgres-scan` — PostgreSQL 16
+- `webhook` — приём деплой-хуков, порт 9000 → `webhook.nikulshin-dev.online`
 
+### CI/CD: GitHub Actions → GHCR → VPS
+
+Любой `git push` с изменениями в `dashboard/` запускает `.github/workflows/deploy-dashboard.yml`:
+1. Сборка Docker-образа на GitHub (бесплатно, с GHA-кешем слоёв)
+2. Push в `ghcr.io/dnikulshin/scan-agent/dashboard:latest`
+3. Вызов webhook → VPS делает `docker compose pull dashboard && docker compose up -d dashboard`
+
+**Ручной деплой** (если CI не нужен):
 ```bash
-# Пересобрать и перезапустить dashboard
 cd /opt/home-codespaces
-git -C ./scan-agent pull
-docker compose up --build -d dashboard
-
-# Очистка build cache (делать раз в неделю — он вырастает до 14+ ГБ)
-docker builder prune -f
+docker compose pull dashboard
+docker compose up -d dashboard
 ```
 
-**Планируется**: GitHub Actions → GHCR → VPS pull (чтобы сборка происходила на GitHub, а не на VPS).
+### Важные нюансы инфраструктуры
+- `adnanh/webhook` **не раскрывает** `${VAR}` в `hooks.json` самостоятельно. В docker-compose используется `envsubst` при запуске: `envsubst < hooks.json > /tmp/hooks.json`
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` передаётся в dashboard как runtime env (не build ARG) — ключ берётся через `/api/vapid-public-key`
+- Очистка build cache (делать раз в неделю): `docker builder prune -f`
 
-## GitHub Actions
+## GitHub Actions Workflows
 
-Workflow `.github/workflows/scan-agent.yml` — cron каждые 30 минут. SQLite DB кешируется между запусками (по `run_id`). Playwright chromium устанавливается при каждом запуске.
+| Workflow | Триггер | Что делает |
+|---|---|---|
+| `scan-agent.yml` | cron каждые 30 мин | Запускает агента: парсинг → AI → уведомления |
+| `deploy-dashboard.yml` | push в `dashboard/` | Сборка → GHCR → деплой на VPS |
