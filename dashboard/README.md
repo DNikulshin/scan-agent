@@ -41,3 +41,4 @@ cd /opt/home-codespaces
 docker compose pull dashboard
 docker compose up -d dashboard
 ```
+
