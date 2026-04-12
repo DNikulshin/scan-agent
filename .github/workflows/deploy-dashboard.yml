@@ -38,12 +38,8 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trigger deploy on VPS
-        env:
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET }}
         run: |
-          PAYLOAD='{"ref":"refs/heads/main"}'
-          SIGNATURE=$(echo -n "$PAYLOAD" | openssl dgst -sha256 -hmac "$WEBHOOK_SECRET" | sed 's/^.* //')
           curl -f -X POST https://webhook.nikulshin-dev.online/hooks/deploy-scan-agent \
             -H "Content-Type: application/json" \
-            -H "X-Hub-Signature-256: sha256=$SIGNATURE" \
-            -d "$PAYLOAD"
+            -H "Authorization: Bearer ${{ secrets.WEBHOOK_SECRET }}" \
+            -d '{"ref":"refs/heads/main"}'
