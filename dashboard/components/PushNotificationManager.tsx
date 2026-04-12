@@ -3,55 +3,37 @@
 import { useEffect, useState } from 'react';
 
 export function PushNotificationManager() {
-  // null = ещё не проверили (избегаем мигания кнопки при загрузке)
   const [permission, setPermission] = useState<NotificationPermission | null>(null);
 
   useEffect(() => {
-    if ('serviceWorker' in navigator && 'PushManager' in window) {
-      navigator.serviceWorker.register('/sw.js').then(async registration => {
-        setPermission(Notification.permission);
-        const subscription = await registration.pushManager.getSubscription();
-        if (subscription) {
-          console.log('Already subscribed');
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+    navigator.serviceWorker.register('/sw.js').then(async registration => {
+      const currentPermission = Notification.permission;
+      setPermission(currentPermission);
+
+      if (currentPermission === 'granted') {
+        const existing = await registration.pushManager.getSubscription();
+        if (existing) {
+          // Подписка есть в браузере — синхронизируем с БД
+          await saveSubscription(existing);
+        } else {
+          // Разрешение есть, подписки нет — создаём автоматически
+          await subscribe(registration);
         }
-      });
-    }
+      }
+    });
   }, []);
 
   const requestPermission = async () => {
-    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
-      console.error('Notifications or Service Worker not supported');
-      return;
-    }
-
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
     const result = await Notification.requestPermission();
     setPermission(result);
     if (result !== 'granted') return;
-
     const registration = await navigator.serviceWorker.ready;
-    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-    const subscription = await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-    });
-
-    try {
-      const res = await fetch('/api/push-subscriptions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          endpoint: subscription.endpoint,
-          p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
-          auth: arrayBufferToBase64(subscription.getKey('auth')!),
-        }),
-      });
-      if (!res.ok) console.error('Error saving push subscription:', await res.text());
-    } catch (err) {
-      console.error('Exception saving push subscription:', err);
-    }
+    await subscribe(registration);
   };
 
-  // null = ещё не проверили; granted/denied = кнопка не нужна
   if (permission !== 'default') return null;
 
   return (
@@ -62,6 +44,43 @@ export function PushNotificationManager() {
       🔔 Включить уведомления
     </button>
   );
+}
+
+async function getVapidPublicKey(): Promise<string> {
+  const res = await fetch('/api/vapid-public-key');
+  if (!res.ok) throw new Error('Failed to fetch VAPID public key');
+  const { key } = await res.json();
+  return key;
+}
+
+async function subscribe(registration: ServiceWorkerRegistration) {
+  try {
+    const vapidPublicKey = await getVapidPublicKey();
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+    await saveSubscription(subscription);
+  } catch (err) {
+    console.error('Push subscribe error:', err);
+  }
+}
+
+async function saveSubscription(subscription: PushSubscription) {
+  try {
+    const res = await fetch('/api/push-subscriptions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: subscription.endpoint,
+        p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
+        auth: arrayBufferToBase64(subscription.getKey('auth')!),
+      }),
+    });
+    if (!res.ok) console.error('Error saving push subscription:', await res.text());
+  } catch (err) {
+    console.error('Exception saving push subscription:', err);
+  }
 }
 
 function urlBase64ToUint8Array(base64String: string) {

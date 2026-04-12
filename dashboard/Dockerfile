@@ -10,9 +10,6 @@ COPY . .
 # DATABASE_URL нужен только для типов при сборке, реальное значение — в runtime env
 ARG DATABASE_URL
 ENV DATABASE_URL=${DATABASE_URL}
-# NEXT_PUBLIC_* встраиваются в клиентский бандл во время сборки — обязательно передавать как ARG
-ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY
-ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
 RUN npm run build
 
 FROM node:20-alpine AS runner
