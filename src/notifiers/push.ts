@@ -1,12 +1,7 @@
+import axios from 'axios';
 import webpush from 'web-push';
-import { createClient } from '@supabase/supabase-js';
 import { config } from '../config';
 import { logger } from '../utils/logger';
-
-const supabase = createClient(
-  config.supabase.url,
-  config.supabase.anonKey,
-);
 
 webpush.setVapidDetails(
   config.push.vapid.subject,
@@ -15,7 +10,7 @@ webpush.setVapidDetails(
 );
 
 export class PushNotifier {
-  async send(subscription: any, payload: any) {
+  async send(subscription: webpush.PushSubscription, payload: object) {
     try {
       await webpush.sendNotification(subscription, JSON.stringify(payload));
       logger.info('Push notification sent');
@@ -24,22 +19,25 @@ export class PushNotifier {
     }
   }
 
-  async sendToAll(payload: any) {
-    const { data: subscriptions } = await supabase
-      .from('push_subscriptions')
-      .select('*');
+  async sendToAll(payload: object) {
+    if (!config.dashboard.url || !config.dashboard.apiKey) return;
 
-    if (subscriptions) {
-      for (const sub of subscriptions) {
-        const subscription = {
-          endpoint: sub.endpoint,
-          keys: {
-            p256dh: sub.p256dh,
-            auth: sub.auth,
-          },
-        };
-        await this.send(subscription, payload);
-      }
+    let subscriptions: Array<{ endpoint: string; p256dh: string; auth: string }>;
+    try {
+      const { data } = await axios.get(`${config.dashboard.url}/api/push-subscriptions`, {
+        headers: { 'Authorization': `Bearer ${config.dashboard.apiKey}` },
+      });
+      subscriptions = data;
+    } catch (err) {
+      logger.error({ err }, 'Не удалось получить push-подписки');
+      return;
+    }
+
+    for (const sub of subscriptions) {
+      await this.send(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload,
+      );
     }
   }
 }

@@ -45,10 +45,14 @@ jobs:
           FREELANCERU_SEARCH_URL: ${{ secrets.FREELANCERU_SEARCH_URL }}
           HABR_ENABLED: ${{ secrets.HABR_ENABLED }}
           HABR_SEARCH_URL: ${{ secrets.HABR_SEARCH_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          # VPS Dashboard (заменяет Supabase)
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
+          # Supabase (опционально, для обратной совместимости)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: npx tsx src/index.ts
 
       - name: Save DB cache

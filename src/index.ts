@@ -6,6 +6,7 @@ import { extractTags } from './core/tagger';
 import { KworkParser, FlParser, FreelanceruParser, HabrParser } from './parsers';
 import { TelegramNotifier } from './notifiers/telegram';
 import { SupabaseNotifier } from './notifiers/supabase';
+import { DashboardNotifier } from './notifiers/dashboard';
 import { PushNotifier } from './notifiers/push';
 import { logger } from './utils/logger';
 import type { Parser } from './types';
@@ -26,9 +27,11 @@ async function run(): Promise<void> {
 
   const storage = new Storage();
   const supabase = new SupabaseNotifier();
-  const telegram = new TelegramNotifier(storage, (orderId, source, hook, pitch) =>
-    supabase.updatePitch(orderId, source, hook, pitch)
-  );
+  const dashboard = new DashboardNotifier();
+  const telegram = new TelegramNotifier(storage, async (orderId, source, hook, pitch) => {
+    await supabase.updatePitch(orderId, source, hook, pitch);
+    await dashboard.updatePitch(orderId, source, hook, pitch);
+  });
   const push = new PushNotifier();
 
   // Запуск listener для inline-кнопок (polling)
@@ -98,6 +101,12 @@ async function run(): Promise<void> {
           await supabase.send(scored);
         } catch (err) {
           logger.error({ err, orderId: order.id }, 'Ошибка отправки в Supabase');
+        }
+
+        try {
+          await dashboard.send(scored);
+        } catch (err) {
+          logger.error({ err, orderId: order.id }, 'Ошибка отправки в Dashboard');
         }
 
         // Помечаем обработанным только если хотя бы один канал сработал

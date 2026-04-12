@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import withPWA from "@ducanh2912/next-pwa";
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   webpack: (config) => config, // Включаем webpack для совместимости с next-pwa
   turbopack: {}, // Пустая конфигурация Turbopack
   async headers() {

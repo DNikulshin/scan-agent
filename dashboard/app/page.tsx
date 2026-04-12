@@ -3,15 +3,9 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { createClient } from '@supabase/supabase-js';
 import { OrderCard } from '@/components/OrderCard';
-import type { Order } from '@/lib/supabase';
+import type { Order } from '@/lib/db';
 import dynamic from 'next/dynamic';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
 type FilterStatus = 'all' | 'new' | 'applied' | 'skipped';
 type FilterSource = 'all' | 'kwork' | 'fl' | 'freelanceru' | 'habr';
@@ -32,39 +26,41 @@ function PageComponent() {
   });
 
   const { data: orders, isLoading, error } = useQuery({
-    queryKey: ['orders', status, source, minScore, activeTag],
+    queryKey: ['orders', status, source, minScore],
     queryFn: async () => {
-      let query = supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
-
-      if (status !== 'all') query = query.eq('status', status);
-      if (source !== 'all') query = query.eq('source', source);
-      if (minScore > 0) query = query.gte('score', minScore);
-
-      const { data, error } = await query;
-      if (error) throw error;
-      return data as Order[];
+      const params = new URLSearchParams();
+      if (status !== 'all') params.set('status', status);
+      if (source !== 'all') params.set('source', source);
+      if (minScore > 0) params.set('minScore', String(minScore));
+      const res = await fetch(`/api/orders?${params}`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json() as Promise<Order[]>;
     },
   });
 
   const updateStatusMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: 'applied' | 'skipped' | 'new' }) => {
-      const update: Record<string, unknown> = { status };
-      if (status === 'applied') update.applied_at = new Date().toISOString();
-      if (status !== 'applied') update.applied_at = null;
-      const { error } = await supabase.from('orders').update(update).eq('id', id);
-      if (error) throw error;
+      const body: Record<string, unknown> = { id, status };
+      if (status === 'applied') body.applied_at = new Date().toISOString();
+      if (status !== 'applied') body.applied_at = null;
+      const res = await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
   });
 
   const updateOutcomeMutation = useMutation({
     mutationFn: async ({ id, outcome }: { id: string; outcome: 'won' | 'lost' | 'pending' }) => {
-      const { error } = await supabase.from('orders').update({ outcome }).eq('id', id);
-      if (error) throw error;
+      const res = await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id, outcome }),
+      });
+      if (!res.ok) throw new Error(await res.text());
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['orders'] }),
   });

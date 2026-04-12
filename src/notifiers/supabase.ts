@@ -5,8 +5,7 @@ import type { ScoredOrder, Notifier } from '../types';
 
 /**
  * Supabase-нотифайер — сохраняет заказ в облачную БД.
- * Используется как резервный канал: даже если Telegram заблокирован,
- * все заказы видны в веб-дашборде на Vercel.
+ * Активен только если задан SUPABASE_URL.
  */
 export class SupabaseNotifier implements Notifier {
   name = 'supabase';

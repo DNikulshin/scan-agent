@@ -1,12 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-);
 
 export function PushNotificationManager() {
   const [permission, setPermission] = useState<NotificationPermission>('default');
@@ -14,13 +8,9 @@ export function PushNotificationManager() {
   useEffect(() => {
     if ('serviceWorker' in navigator && 'PushManager' in window) {
       navigator.serviceWorker.register('/sw.js').then(async registration => {
-        console.log('SW registered for push');
         setPermission(Notification.permission);
-
-        // Проверить существующую subscription
         const subscription = await registration.pushManager.getSubscription();
         if (subscription) {
-          // Уже подписан
           console.log('Already subscribed');
         }
       });
@@ -28,41 +18,35 @@ export function PushNotificationManager() {
   }, []);
 
   const requestPermission = async () => {
-    console.log('Requesting notification permission...');
-    if ('Notification' in window && 'serviceWorker' in navigator) {
-      const result = await Notification.requestPermission();
-      console.log('Permission result:', result);
-      setPermission(result);
-      if (result === 'granted') {
-        console.log('Permission granted, subscribing...');
-        const registration = await navigator.serviceWorker.ready;
-        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
-        console.log('VAPID public key:', vapidPublicKey ? 'present' : 'missing');
-        const subscription = await registration.pushManager.subscribe({
-          userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
-        });
-        console.log('Subscription created:', subscription ? 'yes' : 'no');
-
-        // Отправить subscription в Supabase
-        try {
-          console.log('Saving to Supabase...');
-          const { error } = await supabase.from('push_subscriptions').upsert({
-            endpoint: subscription.endpoint,
-            p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
-            auth: arrayBufferToBase64(subscription.getKey('auth')!),
-          });
-          if (error) {
-            console.error('Error saving push subscription:', error);
-          } else {
-            console.log('Push subscription saved successfully');
-          }
-        } catch (err) {
-          console.error('Exception saving push subscription:', err);
-        }
-      }
-    } else {
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) {
       console.error('Notifications or Service Worker not supported');
+      return;
+    }
+
+    const result = await Notification.requestPermission();
+    setPermission(result);
+    if (result !== 'granted') return;
+
+    const registration = await navigator.serviceWorker.ready;
+    const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!;
+    const subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
+    });
+
+    try {
+      const res = await fetch('/api/push-subscriptions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: subscription.endpoint,
+          p256dh: arrayBufferToBase64(subscription.getKey('p256dh')!),
+          auth: arrayBufferToBase64(subscription.getKey('auth')!),
+        }),
+      });
+      if (!res.ok) console.error('Error saving push subscription:', await res.text());
+    } catch (err) {
+      console.error('Exception saving push subscription:', err);
     }
   };
 

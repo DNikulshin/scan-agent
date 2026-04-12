@@ -28,10 +28,16 @@ export const config = {
     timeout: 10_000,
   },
 
-  /** Supabase */
+  /** Supabase (облако, опционально) */
   supabase: {
     url: process.env.SUPABASE_URL ?? '',
     anonKey: process.env.SUPABASE_ANON_KEY ?? '',
+  },
+
+  /** Dashboard VPS (опционально) */
+  dashboard: {
+    url: process.env.DASHBOARD_URL ?? '',
+    apiKey: process.env.DASHBOARD_API_KEY ?? '',
   },
 
   /** Фильтрация */
