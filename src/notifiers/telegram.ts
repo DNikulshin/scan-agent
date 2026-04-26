@@ -9,6 +9,7 @@ const SOURCE_LABEL: Record<string, string> = {
   fl: 'FL.ru',
   freelanceru: 'Freelance.ru',
   habr: 'Habr',
+  hh: 'HH.ru',
 };
 
 type PitchChoosenCallback = (orderId: string, source: string, hook: string, pitch: string) => Promise<void>;
@@ -26,6 +27,10 @@ export class TelegramNotifier implements Notifier {
   }
 
   async send(scored: ScoredOrder): Promise<void> {
+    if (scored.order.source === 'hh') {
+      return this.sendVacancy(scored);
+    }
+
     const { order, score, pitch } = scored;
     const source = SOURCE_LABEL[order.source] ?? order.source;
     const stars = '⭐'.repeat(Math.min(Math.round(score.score / 2), 5));
@@ -230,6 +235,43 @@ export class TelegramNotifier implements Notifier {
 
   stopCallbackListener(): void {
     this.bot.stopPolling();
+  }
+
+  private async sendVacancy(scored: ScoredOrder): Promise<void> {
+    const { order, score } = scored;
+    const employer = order.meta?.employer ?? '';
+    const city = order.meta?.city ?? '';
+
+    const starCount = Math.min(5, Math.round(score.score / 2));
+    const stars = starCount > 0 ? '⭐'.repeat(starCount) : '☆';
+
+    const lines: (string | null)[] = [
+      `💼 <b>${esc(order.title)}</b>`,
+      ``,
+      employer ? `🏢 ${esc(employer)}` : null,
+      city     ? `📍 ${esc(city)}`     : null,
+      `💰 Зарплата: ${esc(order.price)}`,
+      ``,
+      `${stars} Keyword score: <b>${score.score}/10</b>`,
+      score.reason ? `🎯 <i>${esc(score.reason)}</i>` : null,
+      ``,
+      `🔗 <a href="${order.link}">Открыть вакансию на HH</a>`,
+    ];
+
+    const text = lines.filter(Boolean).join('\n');
+
+    await this.bot.sendMessage(config.telegram.chatId, text, {
+      parse_mode: 'HTML',
+      link_preview_options: { is_disabled: true },
+      reply_markup: {
+        inline_keyboard: [[{ text: '⏭ Пропустить', callback_data: `skip:${order.source}:${order.id}` }]],
+      },
+    });
+
+    logger.info(
+      { orderId: order.id, source: 'hh', score: score.score },
+      'HH вакансия отправлена в Telegram',
+    );
   }
 }
 

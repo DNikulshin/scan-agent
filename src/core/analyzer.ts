@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { z } from 'zod';
 import { config } from '../config';
-import { getProfileContext } from '../profile';
+import { profile, getProfileContext } from '../profile';
 import { logger } from '../utils/logger';
 import { withRetry, isRetryableHttpError } from '../utils/retry';
 import type { Order, ScoreResult, PitchResult } from '../types';
@@ -64,6 +64,7 @@ async function callOpenRouter(params: {
         Authorization: `Bearer ${config.openrouter.apiKey}`,
         'Content-Type': 'application/json',
       },
+      proxy: false,
       timeout: config.openrouter.timeout,
     },
   );
@@ -82,13 +83,14 @@ function parseAndValidate<T>(raw: string, schema: z.ZodSchema<T>): T {
 // ── Шаг 1: Скоринг (бесплатная модель) ──
 
 export async function scoreOrder(order: Order): Promise<ScoreResult | null> {
-  const prompt = `Ты опытный Fullstack-разработчик (Next.js, TypeScript, AI-агенты).
-Оцени заказ с фриланс-биржи: подходит ли он под мой стек?
+  const prompt = `Ты опытный разработчик. Оцени заказ/вакансию: подходит ли под мой стек?
 ВАЖНО: отвечай ТОЛЬКО на русском языке.
+
+МОЙ СТЕК: ${profile.stack.join(', ')}
 
 ${SCORING_EXAMPLES}
 
-Теперь оцени этот заказ:
+Теперь оцени:
 Заказ: "${order.title}"
 Описание: ${order.desc || '(не указано)'}
 Цена: ${order.price || '(не указана)'}

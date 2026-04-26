@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Project Does
 
-An AI-powered agent that scrapes freelance marketplaces (Kwork, FL.ru, Freelance.ru, Habr Freelance), scores projects with an LLM (0–10), generates two pitch variants per project, and sends notifications via Telegram and/or a Next.js dashboard. Runs as a GitHub Actions cron job every 30 minutes.
+An AI-powered agent that scrapes freelance marketplaces (Kwork, FL.ru, Freelance.ru, Habr Freelance) **и вакансии с HH.ru**, scores projects with an LLM (0–10), generates two pitch variants per project, and sends notifications via Telegram and/or a Next.js dashboard. Runs as a GitHub Actions cron job every 30 minutes.
 
-**Pipeline**: Parse → Pre-filter (no AI) → AI Score → Pitch (×2, parallel) → Notify (Telegram + Supabase/Dashboard + Push) → Save to SQLite
+**Pipeline (фриланс)**: Parse → Pre-filter (no AI) → AI Score → Pitch (×2, parallel) → Notify (Telegram + Supabase/Dashboard + Push) → Save to SQLite
+
+**Pipeline (HH.ru)**: Parse → hardExclude (keyword, без AI) → AI Score → Notify (Telegram, без питча) → Save to SQLite
 
 ## Commands
 
@@ -50,12 +52,23 @@ All env vars flow through here with defaults. Parser selectors (CSS) are in conf
 
 ### AI Integration (`src/core/analyzer.ts`)
 - Model: DeepSeek via OpenRouter (cheap, fast)
-- Scoring: temp 0.3, JSON output `{score, reason}`, Zod-validated
+- Scoring: temp 0.3, JSON output `{score, reason}`, Zod-validated. Промпт использует `profile.stack` (реальный стек из `src/profile.ts`)
 - Pitching: temp 0.5/0.9, JSON output `{hook, pitch}`, Russian only, hook ≤100 chars, pitch ≤1000 chars
 - Max 2 attempts per order before skipping
+- Для HH: вызывается только `scoreOrder()`, `generatePitch()` не вызывается
+
+### Keyword Scorer (`src/core/keyword-scorer.ts`)
+Используется только как pre-filter для HH (hardExclude) — убирает PHP/Java/1С/gamedev до AI-вызова.
+Содержит `FULLSTACK_SCORING` и `DEVOPS_SCORING` конфиги.
 
 ### Parsers (`src/parsers/`)
 Each parser implements the `Parser` interface from `src/types.ts` — a `fetch()` method returning `Order[]`. Uses Playwright + puppeteer-extra-stealth. FL.ru parser has a `findWorkingSelector()` fallback method for layout changes. Debug screenshots are saved on parse errors.
+
+**HH.ru parser** (`src/parsers/hh.ts`): отдельный парсер для вакансий. Включается через `HH_ENABLED=true`. Особенности:
+- `offersCount` всегда 0 (фильтр по конкуренции не применяется)
+- `meta.employer` / `meta.city` → для красивого Telegram-сообщения
+- Пагинация: `config.hh.maxPages` страниц (по умолчанию 3)
+- Скоринг: hardExclude (keyword) → AI-скоринг → без питча
 
 **To add a new marketplace**: implement the `Parser` interface, add config entry in `src/config.ts`, export from `src/parsers/index.ts`.
 
@@ -91,6 +104,7 @@ Next.js 16 App Router + React 19 + Tailwind CSS 4 + TanStack React Query. Data f
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`
 - `DASHBOARD_URL`, `DASHBOARD_API_KEY`
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — опционально
+- `HH_ENABLED=true`, `HH_SEARCH_URL`, `HH_MAX_PAGES` (default: 3), `HH_MIN_KEYWORD_SCORE` (default: 10) — HH.ru парсер
 
 **Dashboard** (env в `docker-compose.yml` на VPS):
 - `DATABASE_URL` — `postgresql://scan:...@postgres-scan:5432/scan_agent`
@@ -123,9 +137,34 @@ docker compose up -d dashboard
 - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` передаётся в dashboard как runtime env (не build ARG) — ключ берётся через `/api/vapid-public-key`
 - Очистка build cache (делать раз в неделю): `docker builder prune -f`
 
+### Локальная разработка (dev-окружение)
+- В dev-окружении установлен `HTTP_PROXY=http://172.18.0.1:8118`. Axios автоматически проксирует через него все исходящие запросы — прокси ломает заголовки и OpenRouter отвечает 400 `"Invalid header received from client."`. Все axios-вызовы к внешним API должны иметь `proxy: false`. В GitHub Actions прокси нет, флаг безопасен в обоих окружениях.
+- При локальном `npm run dev` Telegram polling конфликтует с инстансом бота на VPS — ошибки `409 Conflict: terminated by other getUpdates request` в логах нормальны и не мешают работе агента.
+
 ## GitHub Actions Workflows
 
 | Workflow | Триггер | Что делает |
 |---|---|---|
 | `scan-agent.yml` | cron каждые 30 мин | Запускает агента: парсинг → AI → уведомления |
 | `deploy-dashboard.yml` | push в `dashboard/` | Сборка → GHCR → деплой на VPS |
+
+## Лог изменений
+
+### 2026-04-26 — Интеграция HH.ru + обновление профиля
+**Что сделано:**
+- Добавлен `src/parsers/hh.ts` — Playwright-парсер вакансий HH.ru (пагинация, meta: employer/city)
+- Добавлен `src/core/keyword-scorer.ts` — FULLSTACK_SCORING и DEVOPS_SCORING конфиги для hardExclude pre-filter
+- `src/types.ts` — добавлен `'hh'` в union source, поле `meta?`
+- `src/config.ts` — добавлена секция `hh` (enabled/url/maxPages/minKeywordScore)
+- `src/parsers/index.ts` — экспорт HhParser
+- `src/index.ts` — HH-ветка в pipeline: hardExclude → AI scoreOrder() → Telegram (без питча)
+- `src/notifiers/telegram.ts` — HH.ru в SOURCE_LABEL, метод `sendVacancy()` (без inline-кнопок выбора питча)
+- `src/core/analyzer.ts` — промпт скоринга теперь использует `profile.stack` вместо захардкоженного стека
+- `src/profile.ts` — обновлён реальными данными: полный стек (Vue, NestJS, Fastify, Redis, React Native, Expo), 3 реальных проекта из GitHub
+
+**Тест (2026-04-26):** 149 вакансий HH распарсено, 19 новых, 2 отправлено в Telegram — работает.
+
+**Что осталось / идеи:**
+- Добавить `HH_ENABLED=true` в `.env` на VPS и в GitHub Actions secrets
+- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
+- Telegram-сообщение для HH не имеет кнопок «Вариант 1 / Вариант 2» (это ок — для вакансий питч не нужен)

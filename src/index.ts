@@ -1,15 +1,16 @@
 import { validateConfig, config } from './config';
 import { Storage } from './core/storage';
 import { getTrashReason } from './core/filter';
-import { analyzeOrder } from './core/analyzer';
+import { analyzeOrder, scoreOrder } from './core/analyzer';
 import { extractTags } from './core/tagger';
-import { KworkParser, FlParser, FreelanceruParser, HabrParser } from './parsers';
+import { KworkParser, FlParser, FreelanceruParser, HabrParser, HhParser } from './parsers';
+import { calcKeywordScore, FULLSTACK_SCORING } from './core/keyword-scorer';
 import { TelegramNotifier } from './notifiers/telegram';
 import { SupabaseNotifier } from './notifiers/supabase';
 import { DashboardNotifier } from './notifiers/dashboard';
 import { PushNotifier } from './notifiers/push';
 import { logger } from './utils/logger';
-import type { Parser } from './types';
+import type { Parser, ScoredOrder } from './types';
 
 // ── Конфигурация pipeline ──
 
@@ -18,6 +19,7 @@ const parsers: Parser[] = [
   new FlParser(),
   new FreelanceruParser(),
   new HabrParser(),
+  new HhParser(),
 ];
 
 // ── Главная функция ──
@@ -72,14 +74,53 @@ async function run(): Promise<void> {
           `Анализирую: ${order.title}`,
         );
 
-        const result = await analyzeOrder(order, settings.minScore);
+        let scored: ScoredOrder;
 
-        if (!result) {
-          // null = ошибка AI → НЕ сохраняем, повторим в следующем запуске
-          continue;
+        if (order.source === 'hh') {
+          // Быстрый pre-filter по hardExclude — экономим AI-вызов на очевидных несоответствиях
+          const kw = calcKeywordScore(order.title, order.desc, FULLSTACK_SCORING);
+          if (kw.excluded) {
+            logger.debug({ orderId: order.id, match: kw.matches[0] }, '[hh] hardExclude — пропускаем');
+            storage.markProcessed({
+              orderId: order.id, source: order.source,
+              title: order.title, score: 0, link: order.link,
+            });
+            continue;
+          }
+
+          // AI-скоринг — без генерации питча
+          const score = await scoreOrder(order);
+          if (!score) continue; // ошибка AI → повторим в следующем запуске
+
+          if (score.score < settings.minScore) {
+            logger.info({ orderId: order.id, score: score.score }, '[hh] Ниже порога — пропускаем');
+            storage.markProcessed({
+              orderId: order.id, source: order.source,
+              title: order.title, score: score.score, link: order.link,
+            });
+            continue;
+          }
+
+          scored = {
+            order,
+            score,
+            pitch: { hook: '', pitch: '' },
+            tags: extractTags(order),
+          };
+
+        } else {
+          const result = await analyzeOrder(order, settings.minScore);
+          if (!result) continue;
+
+          scored = {
+            order,
+            score: result.score,
+            pitch: result.pitch,
+            pitchB: result.pitchB,
+            tags: extractTags(order),
+          };
         }
 
-        const scored = { order, score: result.score, pitch: result.pitch, pitchB: result.pitchB, tags: extractTags(order) };
         let sent = false;
 
         try {
@@ -115,10 +156,10 @@ async function run(): Promise<void> {
             orderId: order.id,
             source: order.source,
             title: order.title,
-            score: result.score.score,
+            score: scored.score.score,
             link: order.link,
-            pitch: `${result.pitch.hook}\n\n${result.pitch.pitch}`,
-            pitchB: result.pitchB ? JSON.stringify(result.pitchB) : undefined,
+            pitch: scored.pitch.hook ? `${scored.pitch.hook}\n\n${scored.pitch.pitch}` : '',
+            pitchB: scored.pitchB ? JSON.stringify(scored.pitchB) : undefined,
             tags: scored.tags,
           });
         }

@@ -6,39 +6,50 @@ export const profile = {
   name: 'Дмитрий',
 
   /** Главная специализация — одно предложение */
-  headline: 'Fullstack-разработчик: Next.js, TypeScript, AI-интеграции',
+  headline: 'Fullstack-разработчик: Node.js / Next.js / TypeScript, закрываю весь стек от API до мобайла',
 
-  /** Стек технологий (перечисли только то, в чём уверен) */
+  /** Стек технологий */
   stack: [
-    'TypeScript', 'Next.js', 'React', 'Node.js',
-    'PostgreSQL', 'Prisma', 'REST API', 'AI/LLM-агенты',
-    'Playwright', 'Docker',
+    // Frontend
+    'TypeScript', 'React', 'Next.js', 'Vue.js', 'Nuxt.js', 'Zustand', 'TanStack Query',
+    // Backend
+    'Node.js', 'NestJS', 'Fastify', 'Prisma', 'PostgreSQL', 'Redis', 'WebSocket', 'REST API',
+    // Mobile
+    'React Native', 'Expo',
+    // Infra
+    'Docker', 'GitHub Actions', 'Caddy', 'Cloudflare',
+    // AI
+    'AI/LLM-агенты', 'OpenAI API', 'Anthropic API',
   ],
 
-  /** 2-3 завершённых проекта с результатами (конкретика = доверие) */
+  /** Реальные завершённые проекты */
   portfolio: [
-    // TODO: Заполни реальными проектами
+    {
+      title: 'Система управления корпоративным транспортом',
+      result: 'Fastify API + React PWA + Expo-мобайл, real-time GPS-трекинг через Redis/WebSocket',
+    },
+    {
+      title: 'Support Ticketing System — Helpdesk CRM',
+      result: 'NestJS + Next.js, ролевая модель (admin/agent/user), файловые вложения, полный цикл обращений',
+    },
     {
       title: 'AI-агент для мониторинга фриланс-бирж',
-      result: 'Автоматический поиск и оценка заказов, экономит 2 часа в день',
-    },
-    {
-      title: 'Пример: SaaS-дашборд для аналитики',
-      result: 'Next.js + PostgreSQL, 500+ пользователей',
+      result: 'Автопарсинг Kwork/FL.ru/Habr, AI-скоринг + генерация питча, Telegram-уведомления, экономит 2+ ч/день',
     },
   ],
 
-  /** Средние сроки — клиенту важно понимать тайминг */
-  typicalTimeline: '3-14 дней в зависимости от сложности',
+  /** Средние сроки */
+  typicalTimeline: '1–3 дня для типовых задач, 1–2 недели для полноценного продукта',
 
-  /** Как ты общаешься (AI будет подстраивать тон pitch) */
+  /** Стиль общения */
   communicationStyle: 'Конкретно и по делу, без воды. Сразу к сути.',
 
-  /** Преимущества, которые стоит упоминать */
+  /** Преимущества */
   strengths: [
-    'Пишу чистый, типизированный код на TypeScript',
-    'Опыт работы с AI API (OpenAI, Anthropic, OpenRouter)',
-    'Быстрая коммуникация, ежедневные апдейты',
+    'Закрываю весь стек: Node.js/NestJS/Fastify API → React/Next.js/Vue UI → Expo мобайл',
+    'Строгий TypeScript, чистая архитектура, продакшн-опыт',
+    'Реальные AI-интеграции (OpenAI, Anthropic, OpenRouter) в рабочих проектах',
+    'Быстрая коммуникация, ежедневные апдейты по прогрессу',
   ],
 };
 

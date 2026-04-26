@@ -8,6 +8,7 @@ const SOURCE_EMOJI: Record<string, string> = {
   fl: '🔵',
   freelanceru: '🟢',
   habr: '🟣',
+  hh: '🔴',
 };
 
 const STATUS_STYLES: Record<string, string> = {
@@ -62,8 +63,14 @@ export function OrderCard({ order, onStatusUpdate, onOutcomeUpdate }: {
             <span>{SOURCE_EMOJI[typeof order.source === 'string' ? order.source : ''] ?? '⚪'} {typeof order.source === 'string' ? order.source : 'Источник неизвестен'}</span>
             <span>·</span>
             <span>💰 {typeof order.price === 'string' ? order.price : 'Цена неизвестна'}</span>
-            <span>·</span>
-            <span>📊 {typeof order.offers_count === 'number' ? order.offers_count : 0} откликов</span>
+            {order.source === 'hh' ? (
+              <>
+                {order.employer && <><span>·</span><span>🏢 {order.employer}</span></>}
+                {order.city && <><span>·</span><span>📍 {order.city}</span></>}
+              </>
+            ) : (
+              <><span>·</span><span>📊 {typeof order.offers_count === 'number' ? order.offers_count : 0} откликов</span></>
+            )}
             <span>·</span>
             <span>{(() => {
               try {
@@ -101,22 +108,26 @@ export function OrderCard({ order, onStatusUpdate, onOutcomeUpdate }: {
         {typeof order.reason === 'string' ? order.reason : 'Причина не доступна'}
       </p>
 
-      {/* Pitch toggle */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="text-sm text-blue-400 hover:text-blue-300 text-left transition-colors"
-      >
-        {open ? '▲ Скрыть отклик' : '▼ Показать отклик'}
-      </button>
+      {/* Pitch toggle — скрыт для вакансий без питча */}
+      {order.hook || order.pitch ? (
+        <>
+          <button
+            onClick={() => setOpen(v => !v)}
+            className="text-sm text-blue-400 hover:text-blue-300 text-left transition-colors"
+          >
+            {open ? '▲ Скрыть отклик' : '▼ Показать отклик'}
+          </button>
 
-      {open && (
-        <div className="rounded-lg bg-gray-800 p-4 text-sm text-gray-200 leading-relaxed whitespace-pre-wrap select-all cursor-copy border border-gray-700">
-          <p className="italic text-gray-400 mb-2">
-            {typeof order.hook === 'string' ? order.hook : 'Hook не доступен'}
-          </p>
-          {typeof order.pitch === 'string' ? order.pitch : 'Pitch не доступен'}
-        </div>
-      )}
+          {open && (
+            <div className="rounded-lg bg-gray-800 p-4 text-sm text-gray-200 leading-relaxed whitespace-pre-wrap select-all cursor-copy border border-gray-700">
+              <p className="italic text-gray-400 mb-2">
+                {typeof order.hook === 'string' ? order.hook : 'Hook не доступен'}
+              </p>
+              {typeof order.pitch === 'string' ? order.pitch : 'Pitch не доступен'}
+            </div>
+          )}
+        </>
+      ) : null}
 
       {/* Actions */}
       {!isSkipped && (

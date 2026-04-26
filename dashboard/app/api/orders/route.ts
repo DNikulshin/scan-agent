@@ -39,16 +39,19 @@ export async function POST(req: NextRequest) {
   const b = await req.json();
   await db.query(
     `INSERT INTO orders
-       (order_id, source, title, description, price, link, offers_count, score, reason, hook, pitch, tags, status)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'new')
+       (order_id, source, title, description, price, link, offers_count, score, reason, hook, pitch, tags, employer, city, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'new')
      ON CONFLICT (order_id, source) DO UPDATE SET
        score        = EXCLUDED.score,
        reason       = EXCLUDED.reason,
        hook         = EXCLUDED.hook,
        pitch        = EXCLUDED.pitch,
-       tags         = EXCLUDED.tags`,
+       tags         = EXCLUDED.tags,
+       employer     = EXCLUDED.employer,
+       city         = EXCLUDED.city`,
     [b.order_id, b.source, b.title, b.description, b.price, b.link,
-     b.offers_count, b.score, b.reason, b.hook, b.pitch, b.tags ?? ''],
+     b.offers_count, b.score, b.reason, b.hook, b.pitch, b.tags ?? '',
+     b.employer ?? null, b.city ?? null],
   );
   return NextResponse.json({ ok: true });
 }

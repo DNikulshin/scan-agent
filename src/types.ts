@@ -8,7 +8,12 @@ export interface Order {
   price: string;
   link: string;
   offersCount: number;
-  source: 'kwork' | 'fl' | 'freelanceru' | 'habr';
+  source: 'kwork' | 'fl' | 'freelanceru' | 'habr' | 'hh';
+  /** HH-специфичные поля для отображения в Telegram */
+  meta?: {
+    employer?: string;
+    city?: string;
+  };
 }
 
 /** Результат AI-скоринга */

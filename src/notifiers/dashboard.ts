@@ -39,6 +39,8 @@ export class DashboardNotifier implements Notifier {
       hook: pitch.hook,
       pitch: pitch.pitch,
       tags: (scored.tags ?? []).join(','),
+      employer: order.meta?.employer ?? null,
+      city: order.meta?.city ?? null,
     }, { headers: this.headers });
 
     logger.info({ orderId: order.id, source: order.source }, 'Сохранено в Dashboard');

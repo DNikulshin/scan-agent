@@ -53,6 +53,11 @@ jobs:
           # Supabase (опционально, для обратной совместимости)
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          # HH.ru (вакансии)
+          HH_ENABLED: ${{ secrets.HH_ENABLED }}
+          HH_SEARCH_URL: ${{ secrets.HH_SEARCH_URL }}
+          HH_MAX_PAGES: ${{ secrets.HH_MAX_PAGES }}
+          HH_MIN_KEYWORD_SCORE: ${{ secrets.HH_MIN_KEYWORD_SCORE }}
         run: npx tsx src/index.ts
 
       - name: Save DB cache

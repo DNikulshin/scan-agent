@@ -27,6 +27,8 @@ export interface Order {
   hook: string;
   pitch: string;
   tags: string;
+  employer: string | null;
+  city: string | null;
   status: OrderStatus;
   applied_at: string | null;
   outcome: 'pending' | 'won' | 'lost';

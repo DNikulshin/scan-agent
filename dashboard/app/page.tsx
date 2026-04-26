@@ -8,7 +8,7 @@ import type { Order } from '@/lib/db';
 import dynamic from 'next/dynamic';
 
 type FilterStatus = 'all' | 'new' | 'applied' | 'skipped';
-type FilterSource = 'all' | 'kwork' | 'fl' | 'freelanceru' | 'habr';
+type FilterSource = 'all' | 'kwork' | 'fl' | 'freelanceru' | 'habr' | 'hh';
 
 function PageComponent() {
   const router = useRouter();
@@ -186,6 +186,7 @@ function PageComponent() {
           <option value="fl">FL.ru</option>
           <option value="freelanceru">Freelance.ru</option>
           <option value="habr">Habr</option>
+          <option value="hh">HH.ru</option>
         </select>
 
         {/* Min score */}
