@@ -35,7 +35,7 @@ export class HhParser implements Parser {
         const url = buildPageUrl(config.hh.url, pageNum);
         console.log(`🌐 [hh] Страница ${pageNum + 1}/${config.hh.maxPages} → ${url}`);
 
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 60_000 });
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
         const hasVacancies = await page
           .waitForSelector('[data-qa="vacancy-serp__vacancy"]', { timeout: 15_000 })
