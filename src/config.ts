@@ -147,8 +147,8 @@ export const config = {
     enabled: process.env.HH_ENABLED === 'true',
     url: process.env.HH_SEARCH_URL ??
       'https://hh.ru/search/vacancy?employment=project&schedule=remote&text=TypeScript+OR+React+OR+Node.js+OR+Next.js+OR+разработчик&order_by=publication_time',
-    maxPages: Number(process.env.HH_MAX_PAGES ?? '3'),
-    minKeywordScore: Number(process.env.HH_MIN_KEYWORD_SCORE ?? '10'),
+    maxPages: Number(process.env.HH_MAX_PAGES || '3'),
+    minKeywordScore: Number(process.env.HH_MIN_KEYWORD_SCORE || '10'),
   },
 
   /** Push notifications */
