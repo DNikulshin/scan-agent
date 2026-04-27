@@ -21,6 +21,11 @@ export class HhParser implements Parser {
       return [];
     }
 
+    if (!config.hh.url) {
+      console.log('⏭️  [hh] HH_SEARCH_URL не задан — пропускаем');
+      return [];
+    }
+
     const { context, close } = await createBrowser();
     const page = await context.newPage();
     const allVacancies: RawHhVacancy[] = [];
