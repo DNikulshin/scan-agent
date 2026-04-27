@@ -10,7 +10,7 @@ import { SupabaseNotifier } from './notifiers/supabase';
 import { DashboardNotifier } from './notifiers/dashboard';
 import { PushNotifier } from './notifiers/push';
 import { logger } from './utils/logger';
-import type { Parser, ScoredOrder } from './types';
+import type { Order, Parser, ScoredOrder } from './types';
 
 // ── Конфигурация pipeline ──
 
@@ -49,7 +49,13 @@ async function run(): Promise<void> {
 
   try {
     for (const parser of parsers) {
-      const orders = await parser.fetchOrders();
+      let orders: Order[];
+      try {
+        orders = await parser.fetchOrders();
+      } catch (err) {
+        logger.error({ err, parser: parser.name }, 'Ошибка парсера — пропускаем');
+        continue;
+      }
 
       for (const order of orders) {
         if (storage.isProcessed(order.id, order.source)) continue;
