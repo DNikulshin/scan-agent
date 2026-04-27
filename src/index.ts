@@ -83,10 +83,13 @@ async function run(): Promise<void> {
         let scored: ScoredOrder;
 
         if (order.source === 'hh') {
-          // Быстрый pre-filter по hardExclude — экономим AI-вызов на очевидных несоответствиях
+          // Pre-filter: hardExclude + минимальный keyword score — экономим AI-вызовы
           const kw = calcKeywordScore(order.title, order.desc, FULLSTACK_SCORING);
-          if (kw.excluded) {
-            logger.debug({ orderId: order.id, match: kw.matches[0] }, '[hh] hardExclude — пропускаем');
+          if (kw.excluded || kw.rawScore < config.hh.minKeywordScore) {
+            logger.debug(
+              { orderId: order.id, rawScore: kw.rawScore, match: kw.matches[0] },
+              '[hh] pre-filter — пропускаем',
+            );
             storage.markProcessed({
               orderId: order.id, source: order.source,
               title: order.title, score: 0, link: order.link,
