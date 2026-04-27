@@ -150,6 +150,30 @@ docker compose up -d dashboard
 
 ## Лог изменений
 
+### 2026-04-27 — Dashboard поддержка HH.ru + фикс HH_MAX_PAGES
+**Что сделано:**
+- `dashboard/lib/db.ts` — поля `employer` и `city` в интерфейсе `Order`
+- `dashboard/app/api/orders/route.ts` — INSERT/UPDATE сохраняет `employer` и `city`
+- `dashboard/app/page.tsx` — фильтр по источнику включает `hh`
+- `dashboard/components/OrderCard.tsx`:
+  - `hh: '🔴'` в SOURCE_EMOJI
+  - для HH: показывает `🏢 employer` и `📍 city` вместо счётчика откликов
+  - кнопка «Показать отклик» скрыта когда `hook`/`pitch` пустые (все HH-вакансии)
+- `src/notifiers/dashboard.ts` — передаёт `employer` и `city` в POST /api/orders
+- `.github/workflows/scan-agent.yml` — добавлены `HH_ENABLED`, `HH_SEARCH_URL`, `HH_MAX_PAGES`, `HH_MIN_KEYWORD_SCORE`
+- `migrations/001_add_hh_fields.sql` — миграция: `ALTER TABLE orders ADD COLUMN IF NOT EXISTS employer TEXT; ... city TEXT`
+- **fix** `src/config.ts`: `Number(process.env.HH_MAX_PAGES ?? '3')` → `||` — `??` не защищает от пустой строки из незаданного GitHub secret, `Number('')=0` → цикл парсинга не запускался
+
+**Что осталось:**
+- ⚠️ Применить миграцию БД на VPS:
+  ```bash
+  docker exec postgres-scan psql -U scan -d scan_agent \
+    -c "ALTER TABLE orders ADD COLUMN IF NOT EXISTS employer TEXT; ALTER TABLE orders ADD COLUMN IF NOT EXISTS city TEXT;"
+  ```
+- ⚠️ Добавить секрет `HH_ENABLED=true` в GitHub Actions (Settings → Secrets → Actions)
+- ⚠️ Разобраться с деплоем дашборда — образ в GHCR актуальный (deploy-dashboard.yml прошёл), но `scan.nikulshin-dev.online` показывает старую версию. Webhook или docker compose pull не сработали.
+- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
+
 ### 2026-04-26 — Интеграция HH.ru + обновление профиля
 **Что сделано:**
 - Добавлен `src/parsers/hh.ts` — Playwright-парсер вакансий HH.ru (пагинация, meta: employer/city)
@@ -163,8 +187,3 @@ docker compose up -d dashboard
 - `src/profile.ts` — обновлён реальными данными: полный стек (Vue, NestJS, Fastify, Redis, React Native, Expo), 3 реальных проекта из GitHub
 
 **Тест (2026-04-26):** 149 вакансий HH распарсено, 19 новых, 2 отправлено в Telegram — работает.
-
-**Что осталось / идеи:**
-- Добавить `HH_ENABLED=true` в `.env` на VPS и в GitHub Actions secrets
-- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
-- Telegram-сообщение для HH не имеет кнопок «Вариант 1 / Вариант 2» (это ок — для вакансий питч не нужен)
