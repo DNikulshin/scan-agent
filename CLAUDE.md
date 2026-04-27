@@ -58,8 +58,11 @@ All env vars flow through here with defaults. Parser selectors (CSS) are in conf
 - Для HH: вызывается только `scoreOrder()`, `generatePitch()` не вызывается
 
 ### Keyword Scorer (`src/core/keyword-scorer.ts`)
-Используется только как pre-filter для HH (hardExclude) — убирает PHP/Java/1С/gamedev до AI-вызова.
-Содержит `FULLSTACK_SCORING` и `DEVOPS_SCORING` конфиги.
+Pre-filter для HH: hardExclude (PHP/Java/1С/gamedev) + positive score filter.
+- `kw.excluded` → пропустить без AI (hardExclude совпал)
+- `kw.rawScore < config.hh.minKeywordScore` → пропустить без AI (нет релевантных keywords)
+- Содержит `FULLSTACK_SCORING` и `DEVOPS_SCORING` конфиги.
+- `minKeywordScore=10` = минимум 1 core keyword (TypeScript/React/Node.js/etc.) перед AI-вызовом
 
 ### Parsers (`src/parsers/`)
 Each parser implements the `Parser` interface from `src/types.ts` — a `fetch()` method returning `Order[]`. Uses Playwright + puppeteer-extra-stealth. FL.ru parser has a `findWorkingSelector()` fallback method for layout changes. Debug screenshots are saved on parse errors.
@@ -68,7 +71,8 @@ Each parser implements the `Parser` interface from `src/types.ts` — a `fetch()
 - `offersCount` всегда 0 (фильтр по конкуренции не применяется)
 - `meta.employer` / `meta.city` → для красивого Telegram-сообщения
 - Пагинация: `config.hh.maxPages` страниц (по умолчанию 3)
-- Скоринг: hardExclude (keyword) → AI-скоринг → без питча
+- `waitUntil: 'domcontentloaded'` (не networkidle — HH держит фоновые запросы → таймаут)
+- Скоринг: hardExclude + positive keyword score → AI-скоринг → без питча
 
 **To add a new marketplace**: implement the `Parser` interface, add config entry in `src/config.ts`, export from `src/parsers/index.ts`.
 
@@ -150,7 +154,26 @@ docker compose up -d dashboard
 
 ## Лог изменений
 
-### 2026-04-27 — Dashboard поддержка HH.ru + фикс HH_MAX_PAGES
+### 2026-04-27 (сессия 2) — Стабилизация CI/CD + HH парсер
+**Что сделано:**
+- `.github/workflows/deploy-dashboard.yml` — исправлен webhook-вызов: HMAC-SHA256 (`X-Hub-Signature-256`) вместо Bearer-токена. Секрет: `WEBHOOK_SECRET_SCAN_AGENT`
+- `webhook/deploy-scan-agent.sh` — реальный деплой (`docker compose pull dashboard && up -d`) вместо заглушки
+- `src/index.ts` — каждый `parser.fetchOrders()` обёрнут в try-catch: падение одного парсера не роняет весь агент
+- `src/parsers/hh.ts`:
+  - guard на пустой `HH_SEARCH_URL` (возвращает `[]` вместо `Invalid URL`)
+  - `waitUntil: 'domcontentloaded'` вместо `networkidle` + timeout 30s (HH держит фоновые запросы → таймаут 60s)
+- `src/index.ts` — positive keyword filter для HH: `kw.rawScore < config.hh.minKeywordScore` до AI-вызова. Снижает кол-во AI-вызовов с ~75 до ~15 на 149 вакансий
+
+**Закрытые задачи из прошлой сессии:**
+- ✅ Миграция БД на VPS применена (`employer`, `city` колонки)
+- ✅ Секрет `HH_ENABLED=true` добавлен в GitHub Actions
+- ✅ Dashboard деплой починен — CI/CD работает end-to-end
+- ✅ `HH_SEARCH_URL` добавлен в GitHub Actions secrets
+
+**Что осталось:**
+- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
+
+### 2026-04-27 (сессия 1) — Dashboard поддержка HH.ru + фикс HH_MAX_PAGES
 **Что сделано:**
 - `dashboard/lib/db.ts` — поля `employer` и `city` в интерфейсе `Order`
 - `dashboard/app/api/orders/route.ts` — INSERT/UPDATE сохраняет `employer` и `city`
@@ -162,17 +185,7 @@ docker compose up -d dashboard
 - `src/notifiers/dashboard.ts` — передаёт `employer` и `city` в POST /api/orders
 - `.github/workflows/scan-agent.yml` — добавлены `HH_ENABLED`, `HH_SEARCH_URL`, `HH_MAX_PAGES`, `HH_MIN_KEYWORD_SCORE`
 - `migrations/001_add_hh_fields.sql` — миграция: `ALTER TABLE orders ADD COLUMN IF NOT EXISTS employer TEXT; ... city TEXT`
-- **fix** `src/config.ts`: `Number(process.env.HH_MAX_PAGES ?? '3')` → `||` — `??` не защищает от пустой строки из незаданного GitHub secret, `Number('')=0` → цикл парсинга не запускался
-
-**Что осталось:**
-- ⚠️ Применить миграцию БД на VPS:
-  ```bash
-  docker exec postgres-scan psql -U scan -d scan_agent \
-    -c "ALTER TABLE orders ADD COLUMN IF NOT EXISTS employer TEXT; ALTER TABLE orders ADD COLUMN IF NOT EXISTS city TEXT;"
-  ```
-- ⚠️ Добавить секрет `HH_ENABLED=true` в GitHub Actions (Settings → Secrets → Actions)
-- ⚠️ Разобраться с деплоем дашборда — образ в GHCR актуальный (deploy-dashboard.yml прошёл), но `scan.nikulshin-dev.online` показывает старую версию. Webhook или docker compose pull не сработали.
-- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
+- **fix** `src/config.ts`: `Number(process.env.HH_MAX_PAGES ?? '3')` → `||` — `??` не защищает от пустой строки
 
 ### 2026-04-26 — Интеграция HH.ru + обновление профиля
 **Что сделано:**
