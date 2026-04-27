@@ -20,7 +20,7 @@ jobs:
           cache: 'npm'
 
       - name: Restore DB cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: agent.db
           key: agent-db-${{ github.run_id }}

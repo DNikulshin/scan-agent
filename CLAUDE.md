@@ -154,6 +154,19 @@ docker compose up -d dashboard
 
 ## Лог изменений
 
+### 2026-04-27 (сессия 3) — Фикс GitHub Actions cache race condition
+**Проблема:** `Warning: Cache save failed — Unable to reserve cache with key agent-db-<run_id>` при каждом запуске агента.
+
+**Причина:** Двойное сохранение кеша:
+- `actions/cache@v4` (шаг "Restore DB cache") — делал авто-сохранение в post-run с тем же ключом
+- `actions/cache/save@v4` (шаг "Save DB cache") — ещё одно явное сохранение
+
+Оба шага пытались записать в один ключ `agent-db-${{ github.run_id }}` → race condition с самим собой.
+
+**Фикс:** `.github/workflows/scan-agent.yml` — `actions/cache@v4` → `actions/cache/restore@v4` в шаге "Restore DB cache". Единственная запись — явный `actions/cache/save@v4` в конце.
+
+**Нюанс:** `actions/cache@v4` = restore + авто-save на post-run. Если рядом есть явный `cache/save@v4` с тем же ключом — всегда будет конфликт. Паттерн: `actions/cache/restore@v4` + `actions/cache/save@v4` по отдельности.
+
 ### 2026-04-27 (сессия 2) — Стабилизация CI/CD + HH парсер
 **Что сделано:**
 - `.github/workflows/deploy-dashboard.yml` — исправлен webhook-вызов: HMAC-SHA256 (`X-Hub-Signature-256`) вместо Bearer-токена. Секрет: `WEBHOOK_SECRET_SCAN_AGENT`
