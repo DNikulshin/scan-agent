@@ -2,8 +2,8 @@ name: ScanAgent
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # каждые 30 минут
-  workflow_dispatch:         # ручной запуск из GitHub UI
+    - cron: "*/30 * * * *" # каждые 30 минут
+  workflow_dispatch: # ручной запуск из GitHub UI
 
 jobs:
   run-agent:
@@ -16,8 +16,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Restore DB cache
         uses: actions/cache/restore@v4
@@ -59,6 +59,15 @@ jobs:
           HH_MAX_PAGES: ${{ secrets.HH_MAX_PAGES }}
           HH_MIN_KEYWORD_SCORE: ${{ secrets.HH_MIN_KEYWORD_SCORE }}
         run: npx tsx src/index.ts
+
+      - name: Upload agent.db for analysis
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-db-snapshot
+          path: agent.db
+          retention-days: 7
+          if-no-files-found: warn
 
       - name: Save DB cache
         if: always()
