@@ -161,6 +161,19 @@ docker compose up -d dashboard
 
 ## Лог изменений
 
+### 2026-05-03 (сессия 2) — FL без AI-питча + пиковое расписание cron
+**Решение по бизнесу:** на FL.ru AI-питч уступает ручному тексту, а каждая генерация — это токены и минуты Actions. Агент на FL теперь только **отбирает** проекты (skillsWeight предфильтр + AI-скоринг), отклик пишется вручную.
+
+**Изменения:**
+- `src/config.ts` — доукомплектован `config.fl`: `maxPages`, `fetchDelay`, `hardExclude`, `skillsWeight`, `userAgents`, `generatePitch` (флаг режима)
+- `src/index.ts` — ветка `source === 'fl' && !config.fl.generatePitch`: scoreOrder() → пустой pitch → notify. Полный pipeline (score + pitch×2) остаётся для Kwork / Habr / Freelance.ru
+- `src/notifiers/telegram.ts` — метод `send()` роутит по источнику: `hh → sendVacancy`, `fl (без питча) → sendFlOrder`, иначе `sendFreelanceOrder`. У `sendFlOrder` одна кнопка «Пропустить», без A/B вариантов
+- `.github/workflows/scan-agent.yml`:
+  - `FL_GENERATE_PITCH=false`, `FL_MAX_PAGES=5` в env
+  - Cron перестроен по нагрузке: пиковые часы 07-10 / 17-20 МСК — каждые 30 мин; остальное — раз в 2 часа. Экономит ~50% Actions-минут без потери новых проектов
+
+**Нюанс схемы БД:** при пустых hook/pitch колонки в SQLite/Postgres не должны иметь NOT NULL. Сейчас не имеют — fallback `{ hook: '', pitch: '' }` пишется штатно.
+
 ### 2026-05-03 — Фикс FL.ru парсера (page.evaluate падал)
 **Проблема:** парсер FL валился в самом начале:
 ```
