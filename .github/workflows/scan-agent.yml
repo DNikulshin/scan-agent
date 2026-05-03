@@ -2,7 +2,12 @@ name: ScanAgent
 
 on:
   schedule:
-    - cron: "*/30 * * * *" # каждые 30 минут
+    # ── Пиковые часы 07:00–10:00 МСК (04:00–07:00 UTC), каждые 30 мин ──
+    - cron: "0,30 4,5,6 * * *"
+    # ── Пиковые часы 17:00–20:00 МСК (14:00–17:00 UTC), каждые 30 мин ──
+    - cron: "0,30 14,15,16 * * *"
+    # ── Внепиковые часы, раз в 2 часа ──
+    - cron: "0 0,2,8,10,12,18,20,22 * * *"
   workflow_dispatch: # ручной запуск из GitHub UI
 
 jobs:
@@ -39,25 +44,29 @@ jobs:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           KWORK_SEARCH_URL: ${{ secrets.KWORK_SEARCH_URL }}
+          # ── FL.ru ──
           FL_ENABLED: ${{ secrets.FL_ENABLED }}
           FL_SEARCH_URL: ${{ secrets.FL_SEARCH_URL }}
+          FL_GENERATE_PITCH: "false"   # отклики пишем вручную
+          FL_MAX_PAGES: "5"            # ограничение минут Actions
+          # ── Freelance.ru ──
           FREELANCERU_ENABLED: ${{ secrets.FREELANCERU_ENABLED }}
           FREELANCERU_SEARCH_URL: ${{ secrets.FREELANCERU_SEARCH_URL }}
+          # ── Habr ──
           HABR_ENABLED: ${{ secrets.HABR_ENABLED }}
           HABR_SEARCH_URL: ${{ secrets.HABR_SEARCH_URL }}
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          # VPS Dashboard (заменяет Supabase)
-          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
-          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
-          # Supabase (опционально, для обратной совместимости)
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          # HH.ru (вакансии)
+          # ── HH.ru ──
           HH_ENABLED: ${{ secrets.HH_ENABLED }}
           HH_SEARCH_URL: ${{ secrets.HH_SEARCH_URL }}
           HH_MAX_PAGES: ${{ secrets.HH_MAX_PAGES }}
           HH_MIN_KEYWORD_SCORE: ${{ secrets.HH_MIN_KEYWORD_SCORE }}
+          # ── Dashboard / Supabase ──
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: npx tsx src/index.ts
 
       - name: Upload agent.db for analysis
