@@ -6,3 +6,7 @@ agent.db*
 dist/
 kwork-agent-v3/
 kwork-agent-v3.zip
+
+# Локальные архивы проекта
+*.tar.gz
+*.zip
