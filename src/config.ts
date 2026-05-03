@@ -1,22 +1,14 @@
 import "dotenv/config";
 
-// ── Конфигурация проекта ──
-// Все магические числа и настройки собраны в одном месте.
-// Переопределяй через .env или меняй дефолты здесь.
-
 export const config = {
   /** OpenRouter */
   openrouter: {
     apiKey: process.env.OPENROUTER_API_KEY ?? "",
     baseUrl: "https://openrouter.ai/api/v1/chat/completions",
     timeout: 30_000,
-
-    /** Модель для скоринга: дешёвая платная, без rate-limit */
     scoringModel: "deepseek/deepseek-chat",
     scoringFallback: "deepseek/deepseek-chat",
     scoringTemperature: 0.3,
-
-    /** Модель для pitch: дешёвая, но качественная */
     pitchModel: "deepseek/deepseek-chat",
     pitchTemperature: 0.7,
   },
@@ -42,7 +34,6 @@ export const config = {
 
   /** Фильтрация */
   filter: {
-    /** Заказы с этими словами — мусор (не IT) */
     stopWords: [
       "отзыв",
       "реферат",
@@ -56,34 +47,26 @@ export const config = {
       "статья",
       "контент-план",
     ],
-    /** Минимальная цена заказа в рублях */
     minPrice: 1_000,
-    /** Максимум предложений — больше значит конкуренция слишком высока */
     maxOffers: 10,
-    /** Минимальный score для отправки в Telegram */
     minScore: 7,
   },
 
   /** Кэш обработанных ID */
   cache: {
     file: process.env.CACHE_FILE ?? "processed_ids.json",
-    /** Сколько ID хранить (FIFO) */
     maxSize: 500,
   },
 
   /** Задержки */
   delays: {
-    /** Пауза между AI-вызовами (мс) — чтобы не спамить API */
     betweenOrders: 10_000,
-    /** Пауза перед retry при ошибке модели (мс) */
     retryDelay: 3_000,
   },
 
   /** Kwork */
   kwork: {
     url: process.env.KWORK_SEARCH_URL ?? "https://kwork.ru/projects",
-    /** CSS-селекторы — вынесены сюда, чтобы при изменении вёрстки
-     *  менять только конфиг, а не логику парсера */
     selectors: {
       card: ".want-card",
       title: ".wants-card__header-title a",
@@ -92,15 +75,92 @@ export const config = {
       offersContainer: ".mr8",
     },
   },
+
   /** FL.ru */
   fl: {
     enabled: process.env.FL_ENABLED === "true",
+    /** Генерировать AI-питч? false = только скоринг, отклик пишем вручную */
+    generatePitch: process.env.FL_GENERATE_PITCH === "true",
     url: process.env.FL_SEARCH_URL ?? "https://www.fl.ru/projects/",
-    /** Категории IT: программирование, сайты, мобайл, AI */
-    categories: [
-      "https://www.fl.ru/projects/category/programmirovanie/",
-      "https://www.fl.ru/projects/category/saity/",
+    /** Сколько страниц парсить (GitHub Actions: не больше 5 чтобы не тратить минуты) */
+    maxPages: Number(process.env.FL_MAX_PAGES ?? "5"),
+    /** Задержка между страницами: [min, max] мс */
+    fetchDelay: [1_000, 1_800] as [number, number],
+    /**
+     * Стоп-слова FL.ru — заказы содержащие их исключаются до AI.
+     * Дополняют общий filter.stopWords.
+     */
+    hardExclude: [
+      "дизайн",
+      "иллюстрац",
+      "рисунок",
+      "рисовать",
+      "wordpress",
+      "bitrix",
+      "битрикс",
+      "1с",
+      "1c-предприятие",
+      "flash",
+      "unity",
+      "gamedev",
+      "игровой движок",
+      "автокад",
+      "autocad",
+      "3d-модел",
+      "3d модел",
+      "курсовая",
+      "реферат",
+      "диплом",
+      "перевод текст",
+      "копирайт",
+      "рерайт",
+      "seo-текст",
     ],
+    /**
+     * Веса навыков для предварительного скоринга (до AI).
+     * Чем выше — тем важнее для отбора.
+     * Заказы с суммарным весом = 0 пропускаются без AI.
+     */
+    skillsWeight: {
+      TypeScript: 5,
+      React: 5,
+      "Next.js": 5,
+      "Node.js": 5,
+      NestJS: 4,
+      Fastify: 3,
+      "Vue.js": 3,
+      "Nuxt.js": 3,
+      "React Native": 4,
+      Expo: 3,
+      PostgreSQL: 3,
+      Prisma: 3,
+      Redis: 2,
+      WebSocket: 2,
+      "REST API": 2,
+      Docker: 2,
+      "TanStack Query": 2,
+      Zustand: 2,
+      OpenAI: 3,
+      Anthropic: 3,
+      LLM: 3,
+      "GitHub Actions": 1,
+      Telegram: 2,
+      бот: 1,
+      парсинг: 1,
+    } as Record<string, number>,
+    /**
+     * User-Agent пул для ротации.
+     * Добавляйте новые UA по мере старения.
+     */
+    userAgents: [
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 Edg/123.0.0.0",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:125.0) Gecko/20100101 Firefox/125.0",
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    ] as string[],
     selectors: {
       card: '[data-qa="project-item"], .b-post',
       title: '[data-qa="project-item-title"] a, .b-post__title a, h2 a',
@@ -142,24 +202,25 @@ export const config = {
     },
   },
 
-  /** HH.ru — вакансии (keyword-скоринг, без AI) */
+  /** HH.ru — вакансии */
   hh: {
-    enabled: process.env.HH_ENABLED === 'true',
-    url: process.env.HH_SEARCH_URL ??
-      'https://hh.ru/search/vacancy?employment=project&schedule=remote&text=TypeScript+OR+React+OR+Node.js+OR+Next.js+OR+разработчик&order_by=publication_time',
-    maxPages: Number(process.env.HH_MAX_PAGES || '3'),
-    minKeywordScore: Number(process.env.HH_MIN_KEYWORD_SCORE || '10'),
+    enabled: process.env.HH_ENABLED === "true",
+    url:
+      process.env.HH_SEARCH_URL ??
+      "https://hh.ru/search/vacancy?employment=project&schedule=remote&text=TypeScript+OR+React+OR+Node.js+OR+Next.js+OR+разработчик&order_by=publication_time",
+    maxPages: Number(process.env.HH_MAX_PAGES || "3"),
+    minKeywordScore: Number(process.env.HH_MIN_KEYWORD_SCORE || "10"),
   },
 
   /** Push notifications */
   push: {
     vapid: {
-      subject: "mailto:your-email@example.com", // Замените на ваш email
+      subject: "mailto:your-email@example.com",
       publicKey: process.env.VAPID_PUBLIC_KEY ?? "",
       privateKey: process.env.VAPID_PRIVATE_KEY ?? "",
     },
   },
-} as const;
+};
 
 /** Валидация конфига при старте */
 export function validateConfig(): void {
