@@ -1,157 +1,374 @@
-import { config } from '../config';
-import { createBrowser, parseOffersCount, debugScreenshot } from './browser';
-import type { Order, Parser } from '../types';
+import { config } from "../config";
+import { createBrowser, debugScreenshot } from "./browser";
+import type { Order, Parser } from "../types";
 
 /**
  * Парсер FL.ru — крупнейшая русскоязычная биржа фриланса.
  *
- * FL.ru рендерит страницу через JavaScript (SPA), поэтому нужен Playwright.
- * Страница заказов: https://www.fl.ru/projects/
+ * Стратегия:
+ * - Страница 1: page.goto() + $$eval()
+ * - Страницы 2+: fetch() внутри браузера (сессия сохраняется) + DOMParser
+ * - Случайные задержки между страницами (fetchDelay из конфига)
+ * - Ротация User-Agent (userAgents из конфига)
+ * - Предфильтр: hardExclude + skillsWeight (до AI-вызовов)
  *
- * ВАЖНО: FL.ru часто меняет вёрстку. Если парсер сломался:
- * 1. Открой debug-fl-error.png или debug-fl-empty.png
- * 2. Запусти в headless: false (раскомментируй в browser.ts)
- * 3. Через DevTools найди новые селекторы карточек
- * 4. Обнови config.fl.selectors
- *
- * Для доступа ко всем заказам может потребоваться PRO-аккаунт.
- * Без него видны только заказы с пометкой «Доступно без PRO».
+ * Если парсер сломался:
+ * 1. Открой debug-fl-*.png
+ * 2. Обнови config.fl.selectors
  */
+
+const FL_PREFIX = "[FL]";
+
+/** Вспомогательные функции */
+function randomDelay(): number {
+  const [min, max] = config.fl.fetchDelay;
+  return Math.floor(Math.random() * (max - min) + min);
+}
+
+function randomUA(): string {
+  const uas = config.fl.userAgents;
+  return uas[Math.floor(Math.random() * uas.length)];
+}
+
+/** Нормализует базовый URL — убирает /page-N/ если есть */
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/(\/page-\d+\/?)$/, "").replace(/\/$/, "");
+}
+
+/** Строит URL нужной страницы */
+function buildPageUrl(baseUrl: string, page: number): string {
+  const base = normalizeBaseUrl(baseUrl);
+  return page === 1 ? `${base}/` : `${base}/page-${page}/`;
+}
+
+/**
+ * Нормализует строку для гибкого сравнения навыков.
+ * Next.js → nextjs, React Native → reactnative, GitHub-Actions → githubactions
+ */
+function normalizeSkill(s: string): string {
+  return s.toLowerCase().replace(/[\s\-\._]/g, "");
+}
+
+/**
+ * Считает скор релевантности по skillsWeight.
+ * Возвращает суммарный вес совпавших навыков.
+ *
+ * Улучшения:
+ * - Нормализация для гибкого матча (Next.js / nextjs / next-js)
+ * - Word-boundary проверка для защиты от ложных срабатываний (react ≠ reactive)
+ * - Дедупликация в matched
+ */
+function calcSkillScore(text: string): { score: number; matched: string[] } {
+  const textLower = text.toLowerCase();
+  const textNormalized = normalizeSkill(textLower);
+
+  let score = 0;
+  const matched: string[] = [];
+
+  for (const [skill, weight] of Object.entries(config.fl.skillsWeight)) {
+    const skillLower = skill.toLowerCase();
+    const skillNormalized = normalizeSkill(skillLower);
+    const skillWords = skillLower.split(/[\s\-\._]+/).filter(Boolean);
+
+    // Проверка 1: нормализованное включение (ловит вариации написания)
+    const normalizedMatch = textNormalized.includes(skillNormalized);
+
+    // Проверка 2: все слова навыка встречаются как отдельные слова (защита от ложных срабатываний)
+    const wordsMatch = skillWords.every((word) =>
+      new RegExp(
+        `\\b${word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+        "i",
+      ).test(textLower),
+    );
+
+    // Совпадение только если оба условия + нет дублей
+    if (normalizedMatch && wordsMatch && !matched.includes(skill)) {
+      score += weight;
+      matched.push(skill);
+    }
+  }
+
+  return { score, matched };
+}
+
+/**
+ * Проверяет попадание под hardExclude.
+ * Возвращает слово-триггер или null.
+ *
+ * Улучшение: используем \b для точного совпадения слов
+ * (исключаем "диплом", но не "дипломат")
+ */
+function checkHardExclude(text: string): string | null {
+  const textLower = text.toLowerCase();
+  for (const word of config.fl.hardExclude) {
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`\\b${escaped}\\b`, "i");
+    if (regex.test(textLower)) return word;
+  }
+  return null;
+}
+
+/** Тип сырой карточки — используется внутри page.evaluate */
+interface RawCard {
+  id: string;
+  title: string;
+  desc: string;
+  price: string;
+  link: string;
+  offersCount: number;
+}
+
+/**
+ * Парсит карточки из переданного документа.
+ * Если html === null — берём текущий document (page 1).
+ * Иначе — парсим HTML через DOMParser (page 2+).
+ *
+ * Передаётся в page.evaluate как обычная стрелочная функция —
+ * это надёжнее, чем new Function() (Playwright корректно сериализует).
+ */
+function parseCardsInBrowser(html: string | null): RawCard[] {
+  const doc: Document = html
+    ? new DOMParser().parseFromString(html, "text/html")
+    : document;
+
+  const CARD_SELECTORS = ['[data-qa="project-item"]', ".b-post"];
+  const TITLE_SELECTORS = [
+    '[data-qa="project-item-title"] a',
+    ".b-post__title a",
+    "h2 a",
+    "h3 a",
+    '[class*="title"] a',
+  ];
+  const DESC_SELECTORS = [
+    '[data-qa="project-item-description"]',
+    ".b-post__body",
+    ".b-post__txt",
+    '[class*="description"]',
+    '[class*="body"]',
+    "p",
+  ];
+  const PRICE_SELECTORS = [
+    '[data-qa="project-item-budget"]',
+    ".b-post__price",
+    ".text-6",
+    '[class*="price"]',
+    '[class*="budget"]',
+  ];
+  const OFFERS_SELECTORS = [
+    '[data-qa="project-item-responses"]',
+    ".b-post__count",
+    ".text-5",
+    '[class*="response"]',
+    '[class*="count"]',
+    '[class*="offers"]',
+  ];
+
+  const qs = <T extends Element = Element>(
+    el: Element | Document,
+    selectors: string[],
+  ): T | null => {
+    for (const s of selectors) {
+      try {
+        const found = el.querySelector<T>(s);
+        if (found) return found;
+      } catch {}
+    }
+    return null;
+  };
+
+  let cards: Element[] = [];
+  for (const s of CARD_SELECTORS) {
+    try {
+      const found = doc.querySelectorAll(s);
+      if (found && found.length) {
+        cards = Array.from(found);
+        break;
+      }
+    } catch {}
+  }
+
+  return cards
+    .map((card) => {
+      const linkEl = qs<HTMLAnchorElement>(card, TITLE_SELECTORS);
+      const link = linkEl?.href || linkEl?.getAttribute("href") || "";
+      const title = (linkEl?.textContent ?? "").trim();
+      const idMatch = link.match(/\/projects?\/(\d+)/);
+      const id = idMatch?.[1] ?? "";
+
+      const descEl = qs(card, DESC_SELECTORS);
+      const desc = (descEl?.textContent ?? "").trim().slice(0, 300);
+
+      const priceEl = qs(card, PRICE_SELECTORS);
+      const price = (priceEl?.textContent ?? "").trim() || "Договорная";
+
+      const offersEl = qs(card, OFFERS_SELECTORS);
+      const offersMatch = (offersEl?.textContent ?? "").trim().match(/\d+/);
+      const offersCount = offersMatch ? parseInt(offersMatch[0], 10) : 0;
+
+      return { id, title, desc, price, link, offersCount };
+    })
+    .filter((o): o is RawCard => o.id !== "" && o.title !== "");
+}
+
 export class FlParser implements Parser {
-  name = 'fl';
+  name = "fl";
 
   async fetchOrders(): Promise<Order[]> {
     if (!config.fl.enabled) {
-      console.log('⏭️  [fl] Парсер отключён (FL_ENABLED != true)');
+      console.log(`⏭️  ${FL_PREFIX} Парсер отключён (FL_ENABLED != true)`);
       return [];
     }
 
-    const { context, close } = await createBrowser();
+    const ua = randomUA();
+    console.log(`🤖 ${FL_PREFIX} User-Agent: ${ua.slice(0, 60)}...`);
+
+    const { context, close } = await createBrowser({ userAgent: ua });
     const page = await context.newPage();
-    const { selectors } = config.fl;
+    const baseUrl = config.fl.url;
+    const allRaw: RawCard[] = [];
 
     try {
-      console.log(`🌐 [fl] Открываю ${config.fl.url}`);
-      await page.goto(config.fl.url, {
-        waitUntil: 'networkidle',
-        timeout: 60_000,
+      // ── Страница 1: полная навигация ──
+      const page1Url = buildPageUrl(baseUrl, 1);
+      console.log(`🌐 ${FL_PREFIX} Открываю ${page1Url}`);
+
+      await page.goto(page1Url, {
+        waitUntil: "domcontentloaded", // ← быстрее, стабильнее
+        timeout: 30_000,
       });
 
-      // FL.ru может показать попап авторизации — закроем если есть
+      // Закрываем попап авторизации если есть
       await page.click('[class*="close"], [data-qa="close"]').catch(() => {});
-      await page.waitForTimeout(2_000);
+      await page.waitForTimeout(1_500);
 
-      // Ждём карточки заказов — пробуем несколько селекторов
-      const cardSelector = await this.findWorkingSelector(page, selectors.card);
-      if (!cardSelector) {
-        await debugScreenshot(page, 'fl-no-cards');
-        console.warn('⚠️  [fl] Не найдены карточки заказов — вёрстка могла измениться');
+      // Проверяем наличие карточек
+      const hasCards = await page.evaluate(() => {
+        const sels = ['[data-qa="project-item"]', ".b-post"];
+        for (const s of sels) {
+          if (document.querySelectorAll(s).length > 0) return true;
+        }
+        return false;
+      });
+
+      if (!hasCards) {
+        await debugScreenshot(page, "fl-no-cards");
+        console.warn(
+          `⚠️  ${FL_PREFIX} Не найдены карточки на странице 1 — вёрстка могла измениться`,
+        );
         return [];
       }
 
-      // Скроллим вниз чтобы подгрузить lazy-loaded карточки
-      await autoScroll(page);
+      const page1Cards = await page.evaluate(parseCardsInBrowser, null);
+      console.log(`✅ ${FL_PREFIX} Страница 1: ${page1Cards.length} проектов`);
+      allRaw.push(...page1Cards);
 
-      const raw = await page.$$eval(
-        cardSelector,
-        (cards) => {
-          return cards.map(card => {
-            // Ищем ссылку и title — FL.ru часто кладёт их в <a> внутри <h2>
-            const linkEl =
-              card.querySelector('h2 a, h3 a, [class*="title"] a') as HTMLAnchorElement | null;
+      // ── Страницы 2..maxPages: fetch() внутри браузера ──
+      for (let pageNum = 2; pageNum <= config.fl.maxPages; pageNum++) {
+        const delay = randomDelay();
+        await page.waitForTimeout(delay);
 
-            const link = linkEl?.href ?? '';
-            const title = linkEl?.textContent?.trim() ?? '';
+        const pageUrl = buildPageUrl(baseUrl, pageNum);
 
-            // ID: FL.ru использует числовые ID в URL /projects/XXXXX/
-            const idMatch = link.match(/\/projects?\/(\d+)/);
-            const id = idMatch?.[1] ?? '';
+        const result = await page.evaluate(async (url: string) => {
+          try {
+            const resp = await fetch(url, {
+              credentials: "include",
+              headers: { Accept: "text/html,application/xhtml+xml" },
+            });
+            if (!resp.ok || resp.status === 404) return null;
+            return await resp.text();
+          } catch {
+            return null;
+          }
+        }, pageUrl);
 
-            // Описание
-            const descEl = card.querySelector(
-              '[class*="description"], [class*="body"], [class*="txt"], p'
-            );
-            const desc = descEl?.textContent?.trim() ?? '';
+        if (result === null) {
+          console.log(
+            `⛔ ${FL_PREFIX} Остановка на странице ${pageNum} (пустой ответ или 404)`,
+          );
+          break;
+        }
 
-            // Цена — FL.ru пишет "Договорная" или "от XX XXX руб."
-            const priceEl = card.querySelector(
-              '[class*="price"], [class*="budget"], .cost'
-            );
-            const price = priceEl?.textContent?.trim() ?? 'Договорная';
+        // Парсим HTML в браузерном контексте
+        const pageCards = await page.evaluate(parseCardsInBrowser, result);
 
-            // Количество откликов
-            const offersEl = card.querySelector(
-              '[class*="response"], [class*="count"], [class*="offers"]'
-            );
-            const offersText = offersEl?.textContent?.trim() ?? '';
-            const offersMatch = offersText.match(/\d+/);
-            const offersCount = offersMatch ? parseInt(offersMatch[0], 10) : 999;
+        if (pageCards.length === 0) {
+          console.log(
+            `⛔ ${FL_PREFIX} Пустая страница ${pageNum} — останавливаемся`,
+          );
+          break;
+        }
 
-            return { id, title, desc, price, link, offersCount, source: 'fl' as const };
-          }).filter(o => o.id !== '' && o.title !== '');
-        },
-      );
-
-      if (raw.length === 0) {
-        await debugScreenshot(page, 'fl-empty');
-        console.warn('⚠️  [fl] 0 заказов найдено');
-      } else {
-        console.log(`📋 [fl] Найдено: ${raw.length}`);
+        console.log(
+          `✅ ${FL_PREFIX} Страница ${pageNum}: +${pageCards.length} (всего ${allRaw.length + pageCards.length})`,
+        );
+        allRaw.push(...pageCards);
       }
 
-      return raw;
+      console.log(`📋 ${FL_PREFIX} Собрано всего: ${allRaw.length} проектов`);
+
+      // ── Предфильтрация: hardExclude + skillsWeight ──
+      const filtered: Order[] = [];
+      let excludedCount = 0;
+      let lowScoreCount = 0;
+
+      for (const raw of allRaw) {
+        const text = `${raw.title} ${raw.desc}`;
+
+        // 1. hardExclude (с word-boundary)
+        const excludeTrigger = checkHardExclude(text);
+        if (excludeTrigger) {
+          console.log(
+            `🚫 ${FL_PREFIX} hardExclude [${excludeTrigger}]: ${raw.title.slice(0, 60)}`,
+          );
+          excludedCount++;
+          continue;
+        }
+
+        // 2. skillsWeight — фильтруем нерелевантные до AI
+        const { score, matched } = calcSkillScore(text);
+        if (score === 0) {
+          console.log(
+            `⏭️  ${FL_PREFIX} Нет релевантных навыков: ${raw.title.slice(0, 60)}`,
+          );
+          lowScoreCount++;
+          continue;
+        }
+
+        console.log(
+          `✅ ${FL_PREFIX} Релевантно (skill_score=${score}, [${matched.slice(0, 3).join(", ")}]): ${raw.title.slice(0, 50)}`,
+        );
+
+        filtered.push({
+          id: raw.id,
+          title: raw.title,
+          desc: raw.desc,
+          price: raw.price,
+          link: raw.link,
+          offersCount: raw.offersCount, // ← теперь корректный 0 вместо 999
+          source: "fl",
+        });
+      }
+
+      console.log(
+        `📊 ${FL_PREFIX} Итого: ${allRaw.length} собрано → ` +
+          `${excludedCount} hardExclude → ` +
+          `${lowScoreCount} нет навыков → ` +
+          `${filtered.length} передано в pipeline`,
+      );
+
+      if (filtered.length === 0) {
+        await debugScreenshot(page, "fl-empty-filtered");
+        console.warn(`⚠️  ${FL_PREFIX} 0 заказов после фильтрации`);
+      }
+
+      return filtered;
     } catch (err) {
-      await debugScreenshot(page, 'fl-error');
-      console.error('❌ [fl] Ошибка:', (err as Error).message);
+      await debugScreenshot(page, "fl-error");
+      console.error(`❌ ${FL_PREFIX} Ошибка:`, (err as Error).message);
       return [];
     } finally {
       await close();
     }
   }
-
-  /**
-   * FL.ru периодически меняет CSS-классы.
-   * Пробуем несколько селекторов и возвращаем первый рабочий.
-   */
-  private async findWorkingSelector(
-    page: Awaited<ReturnType<Awaited<ReturnType<typeof createBrowser>>['context']['newPage']>>,
-    selectorList: string,
-  ): Promise<string | null> {
-    const candidates = selectorList.split(',').map(s => s.trim());
-
-    for (const sel of candidates) {
-      try {
-        const count = await page.$$eval(sel, els => els.length);
-        if (count > 0) {
-          console.log(`✅ [fl] Селектор работает: "${sel}" (${count} элементов)`);
-          return sel;
-        }
-      } catch {
-        // селектор невалиден — пропускаем
-      }
-    }
-
-    return null;
-  }
-}
-
-/** Плавный скролл для подгрузки lazy-loaded контента */
-async function autoScroll(
-  page: Awaited<ReturnType<Awaited<ReturnType<typeof createBrowser>>['context']['newPage']>>,
-): Promise<void> {
-  await page.evaluate(async () => {
-    await new Promise<void>(resolve => {
-      let totalHeight = 0;
-      const distance = 400;
-      const timer = setInterval(() => {
-        window.scrollBy(0, distance);
-        totalHeight += distance;
-        if (totalHeight >= document.body.scrollHeight || totalHeight > 5000) {
-          clearInterval(timer);
-          resolve();
-        }
-      }, 200);
-    });
-  });
-  await page.waitForTimeout(1_000);
 }
