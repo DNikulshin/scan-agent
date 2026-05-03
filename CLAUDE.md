@@ -1,6 +1,13 @@
-# CLAUDE.md
+# CLAUDE.md — scan-agent
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## 🔗 Глобальный контекст
+
+Роль, стиль общения и система памяти — в глобальном файле, который Claude Code подгружает автоматически:
+`~/.claude/CLAUDE.md` → `/root/.claude/CLAUDE.md`
+
+**Приоритет:** глобальный файл → этот файл → контекст RAG (`codebase-rag` MCP).
+
+---
 
 ## What This Project Does
 
@@ -153,6 +160,31 @@ docker compose up -d dashboard
 | `deploy-dashboard.yml` | push в `dashboard/` | Сборка → GHCR → деплой на VPS |
 
 ## Лог изменений
+
+### 2026-05-03 — Фикс FL.ru парсера (page.evaluate падал)
+**Проблема:** парсер FL валился в самом начале:
+```
+🌐 [FL] Открываю https://www.fl.ru/projects/
+❌ [FL] Ошибка: Cannot read properties of undefined (reading 'length')
+```
+А после первого фикса — новая ошибка:
+```
+❌ [FL] Ошибка: page.evaluate: ReferenceError: __name is not defined
+```
+
+**Причины и фиксы:**
+
+1. **`new Function(\`return ${...}\`)` в `page.evaluate`** (`src/parsers/fl.ts`).
+   Playwright сериализует pageFunction через `toString()`, но для функций, созданных конструктором `Function`, серилизация даёт `function anonymous() { ... }` — Playwright не всегда корректно его выполняет, и `page.evaluate` возвращал `undefined`. Дальше `page1Cards.length` → краш.
+   **Решение:** заменил на обычную функцию `parseCardsInBrowser(html: string | null)` — одна функция парсит и `document` (page 1), и HTML-строку через DOMParser (page 2+). Заодно ушло ~80 строк дублирования.
+
+2. **`__name is not defined` в браузерном контексте** (`src/parsers/browser.ts`).
+   tsx/esbuild с опцией `keepNames` оборачивает именованные функции в `__name(fn, "name")` для сохранения `Function.name`. При сериализации в `page.evaluate` ссылки на `__name` уезжают в браузер, где этого хелпера нет → ReferenceError.
+   **Решение:** в `createBrowser()` добавлен `context.addInitScript()` — инжектит `globalThis.__name = (fn) => fn` в каждую страницу до загрузки. Шим действует на все парсеры (FL, HH, browser-helpers).
+
+**Нюанс на будущее:** при использовании `page.evaluate(fn)` с tsx/esbuild — либо передавать только стрелочные функции, либо держать шим `__name` в init script. Любой именованный `function` или `class` транспилируется с обёрткой.
+
+**Решено по дизайну:** `FL_MAX_PAGES=3` оставляем — на пиковых направлениях 60 проектов/тик хватает (cron каждые 30 мин). Если в логах будут видны новые проекты на 3-й странице — поднимать до 5.
 
 ### 2026-04-27 (сессия 3) — Фикс GitHub Actions cache race condition
 **Проблема:** `Warning: Cache save failed — Unable to reserve cache with key agent-db-<run_id>` при каждом запуске агента.
