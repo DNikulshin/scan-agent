@@ -2,36 +2,74 @@
 
 ## 🔗 Глобальный контекст
 
-Роль, стиль общения и система памяти — в глобальном файле, который Claude Code подгружает автоматически:
-`~/.claude/CLAUDE.md` → `/root/.claude/CLAUDE.md`
+Роль, стиль, система памяти — `~/.claude/CLAUDE.md` (загружается автоматически).
+**Приоритет:** глобальный → этот файл → RAG (`codebase-rag` MCP).
 
-**Приоритет:** глобальный файл → этот файл → контекст RAG (`codebase-rag` MCP).
+## 📚 Дополнительные файлы
+
+Подгружай по мере необходимости, не держи в контексте по умолчанию:
+- [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — **активный план** миграции на Prisma Postgres (читать в начале сессии)
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — лог изменений (только при поиске исторического контекста)
+- [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD, инфра-нюансы (только при работе с деплоем)
+
+---
+
+## 🚧 Текущая задача (in progress)
+
+**Миграция на единую Prisma Postgres БД + метрики прогона.**
+
+План: [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — читать целиком, прежде чем продолжать.
+
+**Прогресс:**
+- ✅ Шаг 1 — Prisma Postgres подключён, `DATABASE_URL` в `.env` (pooled).
+- ✅ Шаг 2 — [prisma/schema.prisma](prisma/schema.prisma) с 4 моделями (Order, Setting, PushSubscription, RunMetric с расширениями Блока 1). Миграция `20260505174149_init` применена.
+- ✅ Шаг 3 — [src/core/storage.ts](src/core/storage.ts) на PrismaClient (async). Callers в [src/index.ts](src/index.ts) и [src/notifiers/telegram.ts](src/notifiers/telegram.ts) проставлены `await`. `count` getter → `count()`. `better-sqlite3` удалён. Прогон 2026-05-05: `totalNew=186, totalSent=8, dbSize=168` — БД пишется, дедуп ОК.
+- ⏳ Шаг 4 (следующий) — `dashboard/lib/db.ts` + API на Prisma.
+- Дальше: удалить `src/notifiers/dashboard.ts` → `src/core/metrics.ts` + инструментирование `src/index.ts` → `/stats` страница + `/api/metrics/export` → workflow.
+
+**Принятые решения:**
+- БД: Prisma Postgres (managed). ORM: Prisma 6.x (Prisma 7 убрали `datasource.url` в schema — несовместимо с планом, не используем).
+- Метрики: per-run в `RunMetric` + ручные статусы заказа (`status`, `outcome`, `applied_at` уже в схеме) + UI-страница `/stats` + MD-экспорт `/api/metrics/export` (all-time). Подробнее: [Блок 1 в `~/.claude/plans/humming-enchanting-castle.md`].
+- Cron в `.github/workflows/scan-agent.yml` оставить как есть.
+
+**Нюансы:**
+- `pg` есть только в `dashboard/node_modules/` — для ad-hoc проверок коннекта.
+- `HTTP_PROXY` в dev может мешать `prisma migrate`/`generate` — все Prisma-команды запускать с `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy npx prisma ...`.
+- Push-нотификатор (`src/notifiers/push.ts`) после миграции: оставить HTTP к dashboard или подключить к БД напрямую — отложено.
+- `migrations/001_add_hh_fields.sql` и `supabase/migration.sql` пока не удаляем — снесём после переписывания storage и dashboard на Prisma.
+
+---
+
+## 🛠️ Инфра
+
+- **Dev-сабдомены через Caddy** (Prisma Studio и любые dev-порты наружу): [docs/dev-subdomains.md](docs/dev-subdomains.md).
+- **Деплой / CI/CD / VPS**: [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ---
 
 ## What This Project Does
 
-An AI-powered agent that scrapes freelance marketplaces (Kwork, FL.ru, Freelance.ru, Habr Freelance) **и вакансии с HH.ru**, scores projects with an LLM (0–10), generates two pitch variants per project, and sends notifications via Telegram and/or a Next.js dashboard. Runs as a GitHub Actions cron job every 30 minutes.
+AI-агент скрапит фриланс-биржи (Kwork, FL.ru, Freelance.ru, Habr Freelance) и вакансии с HH.ru, оценивает проекты LLM (0–10), генерирует 2 варианта питча и шлёт уведомления в Telegram + Next.js dashboard. Запускается cron'ом GitHub Actions.
 
-**Pipeline (фриланс)**: Parse → Pre-filter (no AI) → AI Score → Pitch (×2, parallel) → Notify (Telegram + Supabase/Dashboard + Push) → Save to SQLite
-
-**Pipeline (HH.ru)**: Parse → hardExclude (keyword, без AI) → AI Score → Notify (Telegram, без питча) → Save to SQLite
+**Pipeline (фриланс)**: Parse → Pre-filter (no AI) → AI Score → Pitch (×2, parallel) → Notify → Save
+**Pipeline (FL.ru)**: Parse → Pre-filter → AI Score → Notify (без AI-питча, отклик пишется вручную) → Save
+**Pipeline (HH.ru)**: Parse → hardExclude (keyword) → AI Score → Notify (без питча) → Save
 
 ## Commands
 
 ### Backend (root)
 ```bash
-npm run dev       # Run agent with pretty logs (tsx, PRETTY_LOGS=true)
-npm run build     # Compile TypeScript to dist/
-npm start         # Run compiled dist/index.js
+npm run dev       # Run agent с pretty-логами (tsx, PRETTY_LOGS=true)
+npm run build     # Compile TypeScript → dist/
+npm start         # Run dist/index.js
 npm run lint      # TypeScript type-check (no emit)
-npm run test-push # Тест push-уведомлений (на VPS: .env лежит в /opt/home-codespaces/)
+npm run test-push # Тест push-уведомлений
 ```
 
 ### Dashboard (Next.js 16)
 ```bash
 cd dashboard
-npm run dev    # Dev server на порту 3000
+npm run dev    # Dev на :3000
 npm run build  # Production build
 npm run lint   # ESLint
 ```
@@ -39,222 +77,78 @@ npm run lint   # ESLint
 ## Architecture
 
 ### Core Pipeline (`src/index.ts`)
-1. Initializes Storage (SQLite), Supabase, Dashboard, Telegram, Push notifiers
-2. Starts Telegram callback polling (inline button interactions)
-3. Runs each parser → merges orders
-4. For each new order: fast filter → AI score → if score ≥ minScore, generate 2 pitches in parallel → notify all channels → save
-5. Sends reminders for high-score orders ignored for 2+ hours
-6. With `KEEP_ALIVE=false` (cron mode), exits after 30 seconds
+1. Init: Storage (Prisma Postgres), Telegram, Push, Dashboard notifiers
+2. Telegram callback polling (inline-кнопки)
+3. Parsers → merge → для каждого нового заказа: filter → AI score → (pitch×2 если фриланс/Kwork/Habr) → notify → save
+4. Reminders для high-score заказов через 2+ часа
+5. С `KEEP_ALIVE=false` (cron) — exit через 30 сек
 
 ### Key Design Decisions
-- **Pre-AI filter** (`src/core/filter.ts`): Stop-words, min price, max offers — eliminates cheap/spam orders before paying for LLM
-- **Two pitch temperatures**: Variant A at 0.5 (focused), Variant B at 0.9 (creative), generated concurrently
-- **SQLite as source of truth** (`src/core/storage.ts`): Deduplication by `(order_id, source)` composite key; DB is cached between GitHub Actions runs
-- **Dynamic settings**: minPrice, minScore, maxOffers, stopWords stored in DB, adjustable live via Telegram commands (`/setrate`, `/setscore`, `/setstop`)
-- **Notifier independence**: Telegram, Supabase, Dashboard, Push each fail independently — one failure doesn't block others
-- **Retry with backoff** (`src/utils/retry.ts`): Exponential backoff for OpenRouter, Telegram, Supabase API calls
+- **Pre-AI filter** (`src/core/filter.ts`): стоп-слова, мин. цена, макс. офферы — отсекает мусор до LLM
+- **Two pitch temperatures**: A=0.5 (focused), B=0.9 (creative), параллельно
+- **Prisma Postgres as source of truth** ([src/core/storage.ts](src/core/storage.ts)): дедуп по `(orderId, source)`, все методы async
+- **Dynamic settings**: minPrice/minScore/maxOffers/stopWords хранятся в БД, меняются через Telegram (`/setrate`, `/setscore`, `/setstop`)
+- **Notifier independence**: каждый канал падает независимо
+- **Retry with backoff** (`src/utils/retry.ts`): exponential для OpenRouter / Telegram / Supabase
 
 ### Configuration (`src/config.ts`)
-All env vars flow through here with defaults. Parser selectors (CSS) are in config — update here when marketplace layouts change. The developer profile that feeds AI pitch generation is in `src/profile.ts`.
+Все env с дефолтами. CSS-селекторы парсеров здесь же — обновлять при смене вёрстки маркетплейсов. Профиль разработчика для AI-питча — `src/profile.ts`.
 
 ### AI Integration (`src/core/analyzer.ts`)
-- Model: DeepSeek via OpenRouter (cheap, fast)
-- Scoring: temp 0.3, JSON output `{score, reason}`, Zod-validated. Промпт использует `profile.stack` (реальный стек из `src/profile.ts`)
-- Pitching: temp 0.5/0.9, JSON output `{hook, pitch}`, Russian only, hook ≤100 chars, pitch ≤1000 chars
-- Max 2 attempts per order before skipping
-- Для HH: вызывается только `scoreOrder()`, `generatePitch()` не вызывается
+- Модель: DeepSeek через OpenRouter
+- Scoring: temp 0.3, JSON `{score, reason}`, Zod-валидация. Промпт использует `profile.stack`
+- Pitching: temp 0.5/0.9, JSON `{hook, pitch}`, RU only, hook ≤100, pitch ≤1000
+- Max 2 попытки на заказ
+- Для HH/FL: только `scoreOrder()`, без `generatePitch()`
 
 ### Keyword Scorer (`src/core/keyword-scorer.ts`)
-Pre-filter для HH: hardExclude (PHP/Java/1С/gamedev) + positive score filter.
-- `kw.excluded` → пропустить без AI (hardExclude совпал)
-- `kw.rawScore < config.hh.minKeywordScore` → пропустить без AI (нет релевантных keywords)
-- Содержит `FULLSTACK_SCORING` и `DEVOPS_SCORING` конфиги.
-- `minKeywordScore=10` = минимум 1 core keyword (TypeScript/React/Node.js/etc.) перед AI-вызовом
+Pre-filter для HH: hardExclude (PHP/Java/1С/gamedev) + positive score.
+- `kw.excluded` → пропустить без AI
+- `kw.rawScore < config.hh.minKeywordScore` → пропустить без AI
+- `FULLSTACK_SCORING` / `DEVOPS_SCORING` конфиги
+- `minKeywordScore=10` ≈ минимум 1 core keyword (TypeScript/React/Node.js)
 
 ### Parsers (`src/parsers/`)
-Each parser implements the `Parser` interface from `src/types.ts` — a `fetch()` method returning `Order[]`. Uses Playwright + puppeteer-extra-stealth. FL.ru parser has a `findWorkingSelector()` fallback method for layout changes. Debug screenshots are saved on parse errors.
+Каждый реализует `Parser` interface (`fetch() → Order[]`). Playwright + puppeteer-extra-stealth. FL.ru имеет `findWorkingSelector()` fallback. Debug screenshots при ошибках.
 
-**HH.ru parser** (`src/parsers/hh.ts`): отдельный парсер для вакансий. Включается через `HH_ENABLED=true`. Особенности:
-- `offersCount` всегда 0 (фильтр по конкуренции не применяется)
-- `meta.employer` / `meta.city` → для красивого Telegram-сообщения
-- Пагинация: `config.hh.maxPages` страниц (по умолчанию 3)
-- `waitUntil: 'domcontentloaded'` (не networkidle — HH держит фоновые запросы → таймаут)
-- Скоринг: hardExclude + positive keyword score → AI-скоринг → без питча
+**HH.ru** (`src/parsers/hh.ts`): включается через `HH_ENABLED=true`. `offersCount=0`, `meta.employer/city`, пагинация `config.hh.maxPages` (def 3), `waitUntil: 'domcontentloaded'`.
 
-**To add a new marketplace**: implement the `Parser` interface, add config entry in `src/config.ts`, export from `src/parsers/index.ts`.
+**Добавить маркетплейс**: реализовать `Parser`, добавить в `src/config.ts`, экспортнуть из `src/parsers/index.ts`.
 
 ### Dashboard (`dashboard/`)
-Next.js 16 App Router + React 19 + Tailwind CSS 4 + TanStack React Query. Data from VPS PostgreSQL (via `pg`). `OrderCard` shows both pitch variants with copy-on-tap. **Important**: Next.js 16 has breaking changes — read `node_modules/next/dist/docs/` before modifying frontend code.
+Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные из VPS Postgres через `pg` (мигрирует на Prisma). `OrderCard` показывает оба варианта питча с copy-on-tap.
+**⚠️ Next.js 16** — breaking changes; читать `node_modules/next/dist/docs/` до правок фронта.
 
 #### Service Worker (PWA + Push)
-`dashboard/public/sw.js` — **статичный файл, не генерируется при сборке**. Содержит:
-- Push notification handler (title + body → `showNotification`)
-- `skipWaiting` + `clientsClaim` для мгновенной активации
-- Cache-first для `/_next/static/` (иммутабельные чанки)
-- Network-first для страниц с offline fallback
-
-**Почему статичный**: `@ducanh2912/next-pwa` несовместим с Next.js 16 — при сборке не генерировал `sw.js`. Пакет удалён. `sw.js` коммитится в git, не имеет зависимостей от build-хешей.
-
-`Cache-Control: no-store` на `/sw.js` настроен в `next.config.ts`.
+`dashboard/public/sw.js` — **статичный**, коммитится в git, не генерируется при сборке (т.к. `@ducanh2912/next-pwa` несовместим с Next.js 16, удалён). `Cache-Control: no-store` на `/sw.js` в `next.config.ts`.
 
 #### Push Subscriptions
-- VAPID public key передаётся через `GET /api/vapid-public-key` (runtime), **не** через `NEXT_PUBLIC_*` (build-time). Причина: `NEXT_PUBLIC_*` в standalone Docker-сборке требует ARG на этапе build — это хрупко.
-- `PushNotificationManager` автоматически переподписывает при `permission=granted` + отсутствии подписки (например после очистки БД).
-- Push notifier (`src/notifiers/push.ts`) авто-удаляет подписки с ответом 410/404/403.
+- VAPID public key через `GET /api/vapid-public-key` (runtime), **не** `NEXT_PUBLIC_*` (build-time хрупко в standalone Docker)
+- `PushNotificationManager` авто-переподписывает при `granted` + нет подписки
+- `src/notifiers/push.ts` авто-удаляет подписки на 410/404/403
 
 #### API Routes
-- `GET/POST/DELETE /api/push-subscriptions` — управление подписками (GET/DELETE требуют `DASHBOARD_API_KEY`)
-- `GET /api/vapid-public-key` — отдаёт публичный VAPID ключ клиенту
-- `GET/POST /api/orders` — заказы
-- `POST /api/orders/pitch` — обновить выбранный pitch
+- `GET/POST/DELETE /api/push-subscriptions` (GET/DELETE — `DASHBOARD_API_KEY`)
+- `GET /api/vapid-public-key`
+- `GET/POST /api/orders`, `POST /api/orders/pitch`
 
 ## Environment Variables
 
 **Backend** (`.env` в `/opt/home-codespaces/` на VPS):
 - `OPENROUTER_API_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 - `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`
-- `DASHBOARD_URL`, `DASHBOARD_API_KEY`
+- `DASHBOARD_URL`, `DASHBOARD_API_KEY` (после миграции на Prisma — частично уйдёт)
+- `DATABASE_URL` — Prisma Postgres (после миграции)
 - `SUPABASE_URL`, `SUPABASE_ANON_KEY` — опционально
-- `HH_ENABLED=true`, `HH_SEARCH_URL`, `HH_MAX_PAGES` (default: 3), `HH_MIN_KEYWORD_SCORE` (default: 10) — HH.ru парсер
+- `HH_ENABLED`, `HH_SEARCH_URL`, `HH_MAX_PAGES` (def 3), `HH_MIN_KEYWORD_SCORE` (def 10)
 
-**Dashboard** (env в `docker-compose.yml` на VPS):
-- `DATABASE_URL` — `postgresql://scan:...@postgres-scan:5432/scan_agent`
-- `VAPID_PRIVATE_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `DASHBOARD_API_KEY`
+**Dashboard** (env в `docker-compose.yml`):
+- `DATABASE_URL`, `VAPID_PRIVATE_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `DASHBOARD_API_KEY`
 
-## Деплой на VPS
+## Деплой и инфра
 
-Проект запущен в Docker на `/opt/home-codespaces/`. Состав:
-- `caddy` — reverse proxy (80/443), домен `scan.nikulshin-dev.online`
-- `dashboard` — Next.js 16, образ из GHCR (`ghcr.io/dnikulshin/scan-agent/dashboard:latest`)
-- `postgres-scan` — PostgreSQL 16
-- `webhook` — приём деплой-хуков, порт 9000 → `webhook.nikulshin-dev.online`
+См. [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD pipeline, нюансы webhook/прокси/build-cache.
 
-### CI/CD: GitHub Actions → GHCR → VPS
+## История изменений
 
-Любой `git push` с изменениями в `dashboard/` запускает `.github/workflows/deploy-dashboard.yml`:
-1. Сборка Docker-образа на GitHub (бесплатно, с GHA-кешем слоёв)
-2. Push в `ghcr.io/dnikulshin/scan-agent/dashboard:latest`
-3. Вызов webhook → VPS делает `docker compose pull dashboard && docker compose up -d dashboard`
-
-**Ручной деплой** (если CI не нужен):
-```bash
-cd /opt/home-codespaces
-docker compose pull dashboard
-docker compose up -d dashboard
-```
-
-### Важные нюансы инфраструктуры
-- `adnanh/webhook` **не раскрывает** `${VAR}` в `hooks.json` самостоятельно. В docker-compose используется `envsubst` при запуске: `envsubst < hooks.json > /tmp/hooks.json`
-- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` передаётся в dashboard как runtime env (не build ARG) — ключ берётся через `/api/vapid-public-key`
-- Очистка build cache (делать раз в неделю): `docker builder prune -f`
-
-### Локальная разработка (dev-окружение)
-- В dev-окружении установлен `HTTP_PROXY=http://172.18.0.1:8118`. Axios автоматически проксирует через него все исходящие запросы — прокси ломает заголовки и OpenRouter отвечает 400 `"Invalid header received from client."`. Все axios-вызовы к внешним API должны иметь `proxy: false`. В GitHub Actions прокси нет, флаг безопасен в обоих окружениях.
-- При локальном `npm run dev` Telegram polling конфликтует с инстансом бота на VPS — ошибки `409 Conflict: terminated by other getUpdates request` в логах нормальны и не мешают работе агента.
-
-## GitHub Actions Workflows
-
-| Workflow | Триггер | Что делает |
-|---|---|---|
-| `scan-agent.yml` | cron каждые 30 мин | Запускает агента: парсинг → AI → уведомления |
-| `deploy-dashboard.yml` | push в `dashboard/` | Сборка → GHCR → деплой на VPS |
-
-## Лог изменений
-
-### 2026-05-03 (сессия 2) — FL без AI-питча + пиковое расписание cron
-**Решение по бизнесу:** на FL.ru AI-питч уступает ручному тексту, а каждая генерация — это токены и минуты Actions. Агент на FL теперь только **отбирает** проекты (skillsWeight предфильтр + AI-скоринг), отклик пишется вручную.
-
-**Изменения:**
-- `src/config.ts` — доукомплектован `config.fl`: `maxPages`, `fetchDelay`, `hardExclude`, `skillsWeight`, `userAgents`, `generatePitch` (флаг режима)
-- `src/index.ts` — ветка `source === 'fl' && !config.fl.generatePitch`: scoreOrder() → пустой pitch → notify. Полный pipeline (score + pitch×2) остаётся для Kwork / Habr / Freelance.ru
-- `src/notifiers/telegram.ts` — метод `send()` роутит по источнику: `hh → sendVacancy`, `fl (без питча) → sendFlOrder`, иначе `sendFreelanceOrder`. У `sendFlOrder` одна кнопка «Пропустить», без A/B вариантов
-- `.github/workflows/scan-agent.yml`:
-  - `FL_GENERATE_PITCH=false`, `FL_MAX_PAGES=5` в env
-  - Cron перестроен по нагрузке: пиковые часы 07-10 / 17-20 МСК — каждые 30 мин; остальное — раз в 2 часа. Экономит ~50% Actions-минут без потери новых проектов
-
-**Нюанс схемы БД:** при пустых hook/pitch колонки в SQLite/Postgres не должны иметь NOT NULL. Сейчас не имеют — fallback `{ hook: '', pitch: '' }` пишется штатно.
-
-### 2026-05-03 — Фикс FL.ru парсера (page.evaluate падал)
-**Проблема:** парсер FL валился в самом начале:
-```
-🌐 [FL] Открываю https://www.fl.ru/projects/
-❌ [FL] Ошибка: Cannot read properties of undefined (reading 'length')
-```
-А после первого фикса — новая ошибка:
-```
-❌ [FL] Ошибка: page.evaluate: ReferenceError: __name is not defined
-```
-
-**Причины и фиксы:**
-
-1. **`new Function(\`return ${...}\`)` в `page.evaluate`** (`src/parsers/fl.ts`).
-   Playwright сериализует pageFunction через `toString()`, но для функций, созданных конструктором `Function`, серилизация даёт `function anonymous() { ... }` — Playwright не всегда корректно его выполняет, и `page.evaluate` возвращал `undefined`. Дальше `page1Cards.length` → краш.
-   **Решение:** заменил на обычную функцию `parseCardsInBrowser(html: string | null)` — одна функция парсит и `document` (page 1), и HTML-строку через DOMParser (page 2+). Заодно ушло ~80 строк дублирования.
-
-2. **`__name is not defined` в браузерном контексте** (`src/parsers/browser.ts`).
-   tsx/esbuild с опцией `keepNames` оборачивает именованные функции в `__name(fn, "name")` для сохранения `Function.name`. При сериализации в `page.evaluate` ссылки на `__name` уезжают в браузер, где этого хелпера нет → ReferenceError.
-   **Решение:** в `createBrowser()` добавлен `context.addInitScript()` — инжектит `globalThis.__name = (fn) => fn` в каждую страницу до загрузки. Шим действует на все парсеры (FL, HH, browser-helpers).
-
-**Нюанс на будущее:** при использовании `page.evaluate(fn)` с tsx/esbuild — либо передавать только стрелочные функции, либо держать шим `__name` в init script. Любой именованный `function` или `class` транспилируется с обёрткой.
-
-**Решено по дизайну:** `FL_MAX_PAGES=3` оставляем — на пиковых направлениях 60 проектов/тик хватает (cron каждые 30 мин). Если в логах будут видны новые проекты на 3-й странице — поднимать до 5.
-
-### 2026-04-27 (сессия 3) — Фикс GitHub Actions cache race condition
-**Проблема:** `Warning: Cache save failed — Unable to reserve cache with key agent-db-<run_id>` при каждом запуске агента.
-
-**Причина:** Двойное сохранение кеша:
-- `actions/cache@v4` (шаг "Restore DB cache") — делал авто-сохранение в post-run с тем же ключом
-- `actions/cache/save@v4` (шаг "Save DB cache") — ещё одно явное сохранение
-
-Оба шага пытались записать в один ключ `agent-db-${{ github.run_id }}` → race condition с самим собой.
-
-**Фикс:** `.github/workflows/scan-agent.yml` — `actions/cache@v4` → `actions/cache/restore@v4` в шаге "Restore DB cache". Единственная запись — явный `actions/cache/save@v4` в конце.
-
-**Нюанс:** `actions/cache@v4` = restore + авто-save на post-run. Если рядом есть явный `cache/save@v4` с тем же ключом — всегда будет конфликт. Паттерн: `actions/cache/restore@v4` + `actions/cache/save@v4` по отдельности.
-
-### 2026-04-27 (сессия 2) — Стабилизация CI/CD + HH парсер
-**Что сделано:**
-- `.github/workflows/deploy-dashboard.yml` — исправлен webhook-вызов: HMAC-SHA256 (`X-Hub-Signature-256`) вместо Bearer-токена. Секрет: `WEBHOOK_SECRET_SCAN_AGENT`
-- `webhook/deploy-scan-agent.sh` — реальный деплой (`docker compose pull dashboard && up -d`) вместо заглушки
-- `src/index.ts` — каждый `parser.fetchOrders()` обёрнут в try-catch: падение одного парсера не роняет весь агент
-- `src/parsers/hh.ts`:
-  - guard на пустой `HH_SEARCH_URL` (возвращает `[]` вместо `Invalid URL`)
-  - `waitUntil: 'domcontentloaded'` вместо `networkidle` + timeout 30s (HH держит фоновые запросы → таймаут 60s)
-- `src/index.ts` — positive keyword filter для HH: `kw.rawScore < config.hh.minKeywordScore` до AI-вызова. Снижает кол-во AI-вызовов с ~75 до ~15 на 149 вакансий
-
-**Закрытые задачи из прошлой сессии:**
-- ✅ Миграция БД на VPS применена (`employer`, `city` колонки)
-- ✅ Секрет `HH_ENABLED=true` добавлен в GitHub Actions
-- ✅ Dashboard деплой починен — CI/CD работает end-to-end
-- ✅ `HH_SEARCH_URL` добавлен в GitHub Actions secrets
-
-**Что осталось:**
-- Рассмотреть добавление Task Management CRM или AnyWhereDesk в портфолио профиля
-
-### 2026-04-27 (сессия 1) — Dashboard поддержка HH.ru + фикс HH_MAX_PAGES
-**Что сделано:**
-- `dashboard/lib/db.ts` — поля `employer` и `city` в интерфейсе `Order`
-- `dashboard/app/api/orders/route.ts` — INSERT/UPDATE сохраняет `employer` и `city`
-- `dashboard/app/page.tsx` — фильтр по источнику включает `hh`
-- `dashboard/components/OrderCard.tsx`:
-  - `hh: '🔴'` в SOURCE_EMOJI
-  - для HH: показывает `🏢 employer` и `📍 city` вместо счётчика откликов
-  - кнопка «Показать отклик» скрыта когда `hook`/`pitch` пустые (все HH-вакансии)
-- `src/notifiers/dashboard.ts` — передаёт `employer` и `city` в POST /api/orders
-- `.github/workflows/scan-agent.yml` — добавлены `HH_ENABLED`, `HH_SEARCH_URL`, `HH_MAX_PAGES`, `HH_MIN_KEYWORD_SCORE`
-- `migrations/001_add_hh_fields.sql` — миграция: `ALTER TABLE orders ADD COLUMN IF NOT EXISTS employer TEXT; ... city TEXT`
-- **fix** `src/config.ts`: `Number(process.env.HH_MAX_PAGES ?? '3')` → `||` — `??` не защищает от пустой строки
-
-### 2026-04-26 — Интеграция HH.ru + обновление профиля
-**Что сделано:**
-- Добавлен `src/parsers/hh.ts` — Playwright-парсер вакансий HH.ru (пагинация, meta: employer/city)
-- Добавлен `src/core/keyword-scorer.ts` — FULLSTACK_SCORING и DEVOPS_SCORING конфиги для hardExclude pre-filter
-- `src/types.ts` — добавлен `'hh'` в union source, поле `meta?`
-- `src/config.ts` — добавлена секция `hh` (enabled/url/maxPages/minKeywordScore)
-- `src/parsers/index.ts` — экспорт HhParser
-- `src/index.ts` — HH-ветка в pipeline: hardExclude → AI scoreOrder() → Telegram (без питча)
-- `src/notifiers/telegram.ts` — HH.ru в SOURCE_LABEL, метод `sendVacancy()` (без inline-кнопок выбора питча)
-- `src/core/analyzer.ts` — промпт скоринга теперь использует `profile.stack` вместо захардкоженного стека
-- `src/profile.ts` — обновлён реальными данными: полный стек (Vue, NestJS, Fastify, Redis, React Native, Expo), 3 реальных проекта из GitHub
-
-**Тест (2026-04-26):** 149 вакансий HH распарсено, 19 новых, 2 отправлено в Telegram — работает.
+См. [docs/CHANGELOG.md](docs/CHANGELOG.md) — все значимые изменения с датами и контекстом.
