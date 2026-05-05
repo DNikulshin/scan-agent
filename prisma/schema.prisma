@@ -1,0 +1,96 @@
+// Единая схема для scan-agent (агент + dashboard)
+// Источники полей: supabase/migration.sql, migrations/001_add_hh_fields.sql,
+// SQLite (src/core/storage.ts) — объединены без потерь.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Order {
+  id          String   @id @default(uuid()) @db.Uuid
+  orderId     String   @map("order_id")
+  source      String
+  title       String   @default("")
+  description String   @default("")
+  price       String   @default("")
+  link        String   @default("")
+  offersCount Int      @default(0) @map("offers_count")
+  score       Int      @default(0)
+  reason      String   @default("")
+  hook        String   @default("")
+  pitch       String   @default("")
+  pitchB      String   @default("") @map("pitch_b")
+  tags        String   @default("")
+  employer    String?
+  city        String?
+
+  // new | applied | skipped
+  status  String @default("new")
+  // pending | won | lost
+  outcome String @default("pending")
+
+  blacklisted Boolean   @default(false)
+  processedAt DateTime  @default(now()) @map("processed_at")
+  remindedAt  DateTime? @map("reminded_at")
+  appliedAt   DateTime? @map("applied_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@unique([orderId, source])
+  @@index([status])
+  @@index([score(sort: Desc)])
+  @@index([createdAt(sort: Desc)])
+  @@index([source])
+  @@index([processedAt])
+  @@map("orders")
+}
+
+model Setting {
+  key   String @id
+  value String
+
+  @@map("settings")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid()) @db.Uuid
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("push_subscriptions")
+}
+
+model RunMetric {
+  id              String   @id @default(uuid()) @db.Uuid
+  startedAt       DateTime @map("started_at")
+  finishedAt      DateTime @map("finished_at")
+  durationMs      Int      @map("duration_ms")
+  parsedTotal     Int      @default(0) @map("parsed_total")
+  parsedBySource  Json     @default("{}") @map("parsed_by_source")
+  filtered        Int      @default(0)
+  lowScoreAi      Int      @default(0) @map("low_score_ai")
+  lowScoreKeyword Int      @default(0) @map("low_score_keyword")
+  sent            Int      @default(0)
+  errors          Json     @default("{}")
+
+  // Расширения Блока 1 — метрики/MD
+  scoringCalls    Int     @default(0) @map("scoring_calls")
+  pitchCalls      Int     @default(0) @map("pitch_calls")
+  aiTokensIn      Int     @default(0) @map("ai_tokens_in")
+  aiTokensOut     Int     @default(0) @map("ai_tokens_out")
+  aiCostUsd       Decimal @default(0) @map("ai_cost_usd") @db.Decimal(12, 6)
+  parserDurations Json    @default("{}") @map("parser_durations")
+  scoreHistogram  Json    @default("{}") @map("score_histogram")
+
+  runId     String?  @map("run_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([startedAt])
+  @@map("run_metrics")
+}

@@ -213,15 +213,15 @@ export class TelegramNotifier implements Notifier {
         const storage = this.storage;
 
         if (text === "/stats") {
-          const settings = storage.getSettings();
-          const stats = storage.getStats(settings.minScore);
+          const settings = await storage.getSettings();
+          const stats = await storage.getStats(settings.minScore);
           await this.bot.sendMessage(
             config.telegram.chatId,
             formatStats(stats),
             { parse_mode: "HTML" },
           );
         } else if (text === "/settings") {
-          const settings = storage.getSettings();
+          const settings = await storage.getSettings();
           await this.bot.sendMessage(
             config.telegram.chatId,
             formatSettings(settings),
@@ -231,7 +231,7 @@ export class TelegramNotifier implements Notifier {
           const val = parseInt(text.slice(9).trim(), 10);
           if (isNaN(val) || val < 0)
             throw new Error("Неверное значение. Пример: /setrate 2000");
-          storage.setSetting("minPrice", String(val));
+          await storage.setSetting("minPrice", String(val));
           await this.bot.sendMessage(
             config.telegram.chatId,
             `✅ Мин. бюджет: <b>${val}₽</b>`,
@@ -241,14 +241,14 @@ export class TelegramNotifier implements Notifier {
           const val = parseInt(text.slice(10).trim(), 10);
           if (isNaN(val) || val < 0 || val > 10)
             throw new Error("Неверное значение (0–10). Пример: /setscore 7");
-          storage.setSetting("minScore", String(val));
+          await storage.setSetting("minScore", String(val));
           await this.bot.sendMessage(
             config.telegram.chatId,
             `✅ Мин. балл: <b>${val}/10</b>`,
             { parse_mode: "HTML" },
           );
         } else if (text === "/setstop list") {
-          const { stopWords } = storage.getSettings();
+          const { stopWords } = await storage.getSettings();
           const list = stopWords
             .map((w, i) => `${i + 1}. ${esc(w)}`)
             .join("\n");
@@ -261,10 +261,10 @@ export class TelegramNotifier implements Notifier {
           const word = text.slice(13).trim().toLowerCase();
           if (!word)
             throw new Error("Укажите слово. Пример: /setstop add реферат");
-          const settings = storage.getSettings();
+          const settings = await storage.getSettings();
           if (!settings.stopWords.includes(word)) {
             settings.stopWords.push(word);
-            storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
+            await storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
           }
           await this.bot.sendMessage(
             config.telegram.chatId,
@@ -275,9 +275,9 @@ export class TelegramNotifier implements Notifier {
           const word = text.slice(16).trim().toLowerCase();
           if (!word)
             throw new Error("Укажите слово. Пример: /setstop remove реферат");
-          const settings = storage.getSettings();
+          const settings = await storage.getSettings();
           settings.stopWords = settings.stopWords.filter((w) => w !== word);
-          storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
+          await storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
           await this.bot.sendMessage(
             config.telegram.chatId,
             `✅ Стоп-слово удалено: <b>${esc(word)}</b>`,
@@ -305,7 +305,7 @@ export class TelegramNotifier implements Notifier {
 
       if (action === "skip") {
         try {
-          this.storage!.blacklist(orderId, source);
+          await this.storage!.blacklist(orderId, source);
           await this.bot.answerCallbackQuery(query.id, {
             text: "✅ Добавлен в blacklist",
           });
@@ -328,7 +328,7 @@ export class TelegramNotifier implements Notifier {
       } else if (action === "pick1" || action === "pick2") {
         try {
           const variant = action === "pick1" ? "a" : "b";
-          const chosen = this.storage!.choosePitch(orderId, source, variant);
+          const chosen = await this.storage!.choosePitch(orderId, source, variant);
 
           if (chosen && this.onPitchChosen) {
             await this.onPitchChosen(

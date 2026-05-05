@@ -42,9 +42,9 @@ async function run(): Promise<void> {
   const push = new PushNotifier();
 
   telegram.startCallbackListener();
-  storage.cleanup(30);
+  await storage.cleanup(30);
 
-  const settings = storage.getSettings();
+  const settings = await storage.getSettings();
   logger.info({ settings }, "Запуск агента");
   let totalNew = 0;
   let totalSent = 0;
@@ -63,7 +63,7 @@ async function run(): Promise<void> {
       }
 
       for (const order of orders) {
-        if (storage.isProcessed(order.id, order.source)) continue;
+        if (await storage.isProcessed(order.id, order.source)) continue;
 
         totalNew++;
 
@@ -73,7 +73,7 @@ async function run(): Promise<void> {
             { orderId: order.id, parser: parser.name, reason: trashReason },
             "Мусор",
           );
-          storage.markProcessed({
+          await storage.markProcessed({
             orderId: order.id,
             source: order.source,
             title: order.title,
@@ -106,7 +106,7 @@ async function run(): Promise<void> {
               },
               "[hh] pre-filter — пропускаем",
             );
-            storage.markProcessed({
+            await storage.markProcessed({
               orderId: order.id,
               source: order.source,
               title: order.title,
@@ -124,7 +124,7 @@ async function run(): Promise<void> {
               { orderId: order.id, score: score.score },
               "[hh] Ниже порога — пропускаем",
             );
-            storage.markProcessed({
+            await storage.markProcessed({
               orderId: order.id,
               source: order.source,
               title: order.title,
@@ -151,7 +151,7 @@ async function run(): Promise<void> {
               { orderId: order.id, score: score.score },
               "[FL] Ниже порога — пропускаем",
             );
-            storage.markProcessed({
+            await storage.markProcessed({
               orderId: order.id,
               source: order.source,
               title: order.title,
@@ -219,7 +219,7 @@ async function run(): Promise<void> {
         }
 
         if (sent) {
-          storage.markProcessed({
+          await storage.markProcessed({
             orderId: order.id,
             source: order.source,
             title: order.title,
@@ -237,11 +237,11 @@ async function run(): Promise<void> {
       }
     }
   } finally {
-    const unreminded = storage.getUnremindedOrders(config.filter.minScore, 2);
+    const unreminded = await storage.getUnremindedOrders(config.filter.minScore, 2);
     for (const order of unreminded) {
       try {
         await telegram.sendReminder(order);
-        storage.markReminded(order.order_id, order.source);
+        await storage.markReminded(order.order_id, order.source);
       } catch (err) {
         logger.error(
           { err, orderId: order.order_id },
@@ -253,15 +253,16 @@ async function run(): Promise<void> {
       logger.info({ count: unreminded.length }, "Напоминания отправлены");
     }
 
+    const dbSize = await storage.count();
     logger.info(
-      { totalNew, totalSent, dbSize: storage.count },
+      { totalNew, totalSent, dbSize },
       "Цикл завершён",
     );
 
     if (!process.env.KEEP_ALIVE) {
-      setTimeout(() => {
+      setTimeout(async () => {
         telegram.stopCallbackListener();
-        storage.close();
+        await storage.close();
         process.exit(0);
       }, 30_000);
     }

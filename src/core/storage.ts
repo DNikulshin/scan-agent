@@ -1,5 +1,4 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { Prisma, PrismaClient } from '@prisma/client';
 
 import { config } from '../config';
 import { logger } from '../utils/logger';
@@ -31,47 +30,48 @@ export interface StatsResult {
   total_count: number;
 }
 
+interface StatsRow {
+  today_total: bigint | null;
+  today_sent: bigint | null;
+  today_skipped: bigint | null;
+  week_total: bigint | null;
+  week_sent: bigint | null;
+  week_skipped: bigint | null;
+  week_avg_score: Prisma.Decimal | number | null;
+  total_count: bigint | null;
+}
+
+const num = (v: bigint | null | undefined): number => Number(v ?? 0n);
+
 /**
- * SQLite-хранилище для обработанных заказов.
- *
- * Преимущества перед JSON-кэшем:
- * - Атомарные записи, нет гонки данных
- * - Blacklist для заказов (кнопка "Пропустить" в Telegram)
- * - История с оценками — база для будущего веб-интерфейса
- * - Быстрый поиск по ID
+ * Хранилище заказов на Prisma Postgres.
+ * Все методы async (Prisma client async-only).
  */
 export class Storage {
-  private db: Database.Database;
+  private prisma: PrismaClient;
 
-  constructor() {
-    const dbPath = process.env.DB_PATH ?? path.join(process.cwd(), 'agent.db');
-    this.db = new Database(dbPath);
-
-    // WAL-mode для лучшей производительности при конкурентном доступе
-    this.db.pragma('journal_mode = WAL');
-
-    this.migrate();
-    logger.info({ dbPath }, 'SQLite хранилище инициализировано');
+  constructor(prisma?: PrismaClient) {
+    this.prisma = prisma ?? new PrismaClient();
+    logger.info('Prisma Postgres хранилище инициализировано');
   }
 
-  /** Проверяет, был ли заказ уже обработан */
-  isProcessed(orderId: string, source: string): boolean {
-    const row = this.db
-      .prepare('SELECT 1 FROM orders WHERE order_id = ? AND source = ?')
-      .get(orderId, source);
-    return !!row;
+  async isProcessed(orderId: string, source: string): Promise<boolean> {
+    const row = await this.prisma.order.findUnique({
+      where: { orderId_source: { orderId, source } },
+      select: { id: true },
+    });
+    return row !== null;
   }
 
-  /** Проверяет, в чёрном ли списке заказ */
-  isBlacklisted(orderId: string, source: string): boolean {
-    const row = this.db
-      .prepare('SELECT 1 FROM orders WHERE order_id = ? AND source = ? AND blacklisted = 1')
-      .get(orderId, source);
-    return !!row;
+  async isBlacklisted(orderId: string, source: string): Promise<boolean> {
+    const row = await this.prisma.order.findUnique({
+      where: { orderId_source: { orderId, source } },
+      select: { blacklisted: true },
+    });
+    return row?.blacklisted === true;
   }
 
-  /** Сохраняет обработанный заказ */
-  markProcessed(params: {
+  async markProcessed(params: {
     orderId: string;
     source: string;
     title: string;
@@ -80,86 +80,79 @@ export class Storage {
     pitch?: string;
     pitchB?: string;
     tags?: string[];
-  }): void {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO orders (order_id, source, title, score, link, pitch, pitch_b, tags, processed_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      )
-      .run(params.orderId, params.source, params.title, params.score, params.link, params.pitch ?? '', params.pitchB ?? '', (params.tags ?? []).join(','));
+  }): Promise<void> {
+    const data = {
+      title: params.title,
+      score: params.score,
+      link: params.link,
+      pitch: params.pitch ?? '',
+      pitchB: params.pitchB ?? '',
+      tags: (params.tags ?? []).join(','),
+      processedAt: new Date(),
+    };
+    await this.prisma.order.upsert({
+      where: { orderId_source: { orderId: params.orderId, source: params.source } },
+      create: { orderId: params.orderId, source: params.source, ...data },
+      update: data,
+    });
   }
 
-  /** Возвращает сохранённый питч для заказа */
-  getPitch(orderId: string, source: string): string {
-    const row = this.db
-      .prepare('SELECT pitch FROM orders WHERE order_id = ? AND source = ?')
-      .get(orderId, source) as { pitch: string } | undefined;
+  async getPitch(orderId: string, source: string): Promise<string> {
+    const row = await this.prisma.order.findUnique({
+      where: { orderId_source: { orderId, source } },
+      select: { pitch: true },
+    });
     return row?.pitch ?? '';
   }
 
-  /** Добавляет заказ в чёрный список (кнопка "Пропустить" в Telegram) */
-  blacklist(orderId: string, source: string): void {
-    const result = this.db
-      .prepare(
-        `UPDATE orders SET blacklisted = 1 WHERE order_id = ? AND source = ?`,
-      )
-      .run(orderId, source);
-
-    // Если заказа ещё нет — создаём запись сразу с blacklist
-    if (result.changes === 0) {
-      this.db
-        .prepare(
-          `INSERT INTO orders (order_id, source, blacklisted, processed_at)
-           VALUES (?, ?, 1, datetime('now'))`,
-        )
-        .run(orderId, source);
-    }
-
+  async blacklist(orderId: string, source: string): Promise<void> {
+    await this.prisma.order.upsert({
+      where: { orderId_source: { orderId, source } },
+      create: { orderId, source, blacklisted: true, processedAt: new Date() },
+      update: { blacklisted: true },
+    });
     logger.info({ orderId, source }, 'Заказ добавлен в blacklist');
   }
 
-  /** Загружает динамические настройки, дефолты — из config */
-  getSettings(): DynamicSettings {
-    const rows = this.db
-      .prepare('SELECT key, value FROM settings')
-      .all() as { key: string; value: string }[];
-    const map = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  async getSettings(): Promise<DynamicSettings> {
+    const rows = await this.prisma.setting.findMany();
+    const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
     return {
-      minPrice:  map['minPrice']  ? parseInt(map['minPrice'], 10)  : config.filter.minPrice,
-      minScore:  map['minScore']  ? parseInt(map['minScore'], 10)  : config.filter.minScore,
+      minPrice: map['minPrice'] ? parseInt(map['minPrice'], 10) : config.filter.minPrice,
+      minScore: map['minScore'] ? parseInt(map['minScore'], 10) : config.filter.minScore,
       maxOffers: map['maxOffers'] ? parseInt(map['maxOffers'], 10) : config.filter.maxOffers,
-      stopWords: map['stopWords'] ? JSON.parse(map['stopWords'])   : [...config.filter.stopWords],
+      stopWords: map['stopWords'] ? JSON.parse(map['stopWords']) : [...config.filter.stopWords],
     };
   }
 
-  /** Сохраняет одну настройку */
-  setSetting(key: string, value: string): void {
-    this.db
-      .prepare('INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)')
-      .run(key, value);
+  async setSetting(key: string, value: string): Promise<void> {
+    await this.prisma.setting.upsert({
+      where: { key },
+      create: { key, value },
+      update: { value },
+    });
     logger.info({ key, value }, 'Настройка обновлена');
   }
 
-  /**
-   * Помечает выбранный вариант питча как основной.
-   * Возвращает hook и pitch выбранного варианта (для обновления Supabase),
-   * или null если данные не найдены / выбран вариант A (уже в Supabase).
-   */
-  choosePitch(orderId: string, source: string, variant: 'a' | 'b'): { hook: string; pitch: string } | null {
-    if (variant === 'a') return null; // вариант A уже сохранён в Supabase при первичной отправке
+  async choosePitch(
+    orderId: string,
+    source: string,
+    variant: 'a' | 'b',
+  ): Promise<{ hook: string; pitch: string } | null> {
+    if (variant === 'a') return null;
 
-    const row = this.db
-      .prepare('SELECT pitch_b FROM orders WHERE order_id = ? AND source = ?')
-      .get(orderId, source) as { pitch_b: string } | undefined;
-
-    if (!row?.pitch_b) return null;
+    const row = await this.prisma.order.findUnique({
+      where: { orderId_source: { orderId, source } },
+      select: { pitchB: true },
+    });
+    if (!row?.pitchB) return null;
 
     try {
-      const parsed = JSON.parse(row.pitch_b) as { hook: string; pitch: string };
-      // Обновляем основной pitch в SQLite
-      this.db
-        .prepare(`UPDATE orders SET pitch = ? WHERE order_id = ? AND source = ?`)
-        .run(`${parsed.hook}\n\n${parsed.pitch}`, orderId, source);
+      const parsed = JSON.parse(row.pitchB) as { hook: string; pitch: string };
+      await this.prisma.order.update({
+        where: { orderId_source: { orderId, source } },
+        data: { pitch: `${parsed.hook}\n\n${parsed.pitch}` },
+      });
       logger.info({ orderId, source }, 'Выбран вариант B');
       return parsed;
     } catch {
@@ -167,93 +160,76 @@ export class Storage {
     }
   }
 
-  /** Заказы, которым нужно отправить напоминание */
-  getUnremindedOrders(minScore: number, afterHours: number = 2): ReminderOrder[] {
-    const interval = `-${afterHours} hours`;
-    return this.db.prepare(`
-      SELECT order_id, source, title, link, score, pitch
-      FROM orders
-      WHERE score >= ?
-        AND blacklisted = 0
-        AND reminded_at IS NULL
-        AND processed_at <= datetime('now', ?)
-    `).all(minScore, interval) as ReminderOrder[];
+  async getUnremindedOrders(minScore: number, afterHours: number = 2): Promise<ReminderOrder[]> {
+    const cutoff = new Date(Date.now() - afterHours * 60 * 60 * 1000);
+    const rows = await this.prisma.order.findMany({
+      where: {
+        score: { gte: minScore },
+        blacklisted: false,
+        remindedAt: null,
+        processedAt: { lte: cutoff },
+      },
+      select: { orderId: true, source: true, title: true, link: true, score: true, pitch: true },
+    });
+    return rows.map((r) => ({
+      order_id: r.orderId,
+      source: r.source,
+      title: r.title,
+      link: r.link,
+      score: r.score,
+      pitch: r.pitch,
+    }));
   }
 
-  /** Помечает заказ как напомненный */
-  markReminded(orderId: string, source: string): void {
-    this.db
-      .prepare(`UPDATE orders SET reminded_at = datetime('now') WHERE order_id = ? AND source = ?`)
-      .run(orderId, source);
+  async markReminded(orderId: string, source: string): Promise<void> {
+    await this.prisma.order.update({
+      where: { orderId_source: { orderId, source } },
+      data: { remindedAt: new Date() },
+    });
   }
 
-  /** Статистика агента */
-  getStats(minScore: number): StatsResult {
-    return this.db.prepare(`
+  async getStats(minScore: number): Promise<StatsResult> {
+    const rows = await this.prisma.$queryRaw<StatsRow[]>`
       SELECT
-        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') THEN 1 ELSE 0 END) AS today_total,
-        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') AND score >= ? AND blacklisted = 0 THEN 1 ELSE 0 END) AS today_sent,
-        SUM(CASE WHEN processed_at >= datetime('now', '-1 day') AND blacklisted = 1 THEN 1 ELSE 0 END) AS today_skipped,
-        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS week_total,
-        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') AND score >= ? AND blacklisted = 0 THEN 1 ELSE 0 END) AS week_sent,
-        SUM(CASE WHEN processed_at >= datetime('now', '-7 days') AND blacklisted = 1 THEN 1 ELSE 0 END) AS week_skipped,
-        ROUND(AVG(CASE WHEN processed_at >= datetime('now', '-7 days') AND score > 0 THEN CAST(score AS REAL) END), 1) AS week_avg_score,
-        COUNT(*) AS total_count
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '1 day')                                                     AS today_total,
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '1 day' AND score >= ${minScore} AND blacklisted = false)    AS today_sent,
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '1 day' AND blacklisted = true)                              AS today_skipped,
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '7 days')                                                    AS week_total,
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '7 days' AND score >= ${minScore} AND blacklisted = false)   AS week_sent,
+        COUNT(*) FILTER (WHERE processed_at >= NOW() - INTERVAL '7 days' AND blacklisted = true)                             AS week_skipped,
+        ROUND(AVG(CASE WHEN processed_at >= NOW() - INTERVAL '7 days' AND score > 0 THEN score::numeric END), 1)             AS week_avg_score,
+        COUNT(*)                                                                                                              AS total_count
       FROM orders
-    `).get(minScore, minScore) as StatsResult;
+    `;
+    const r = rows[0];
+    return {
+      today_total: num(r.today_total),
+      today_sent: num(r.today_sent),
+      today_skipped: num(r.today_skipped),
+      week_total: num(r.week_total),
+      week_sent: num(r.week_sent),
+      week_skipped: num(r.week_skipped),
+      week_avg_score: r.week_avg_score === null ? null : Number(r.week_avg_score),
+      total_count: num(r.total_count),
+    };
   }
 
-  /** Количество обработанных заказов */
-  get count(): number {
-    const row = this.db.prepare('SELECT COUNT(*) as cnt FROM orders').get() as { cnt: number };
-    return row.cnt;
+  async count(): Promise<number> {
+    return this.prisma.order.count();
   }
 
-  /** Очистка старых записей (старше N дней) */
-  cleanup(daysOld: number = 30): number {
-    const result = this.db
-      .prepare(`DELETE FROM orders WHERE processed_at < datetime('now', ?)`)
-      .run(`-${daysOld} days`);
-    if (result.changes > 0) {
-      logger.info({ deleted: result.changes, daysOld }, 'Очищены старые записи');
+  async cleanup(daysOld: number = 30): Promise<number> {
+    const cutoff = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000);
+    const result = await this.prisma.order.deleteMany({
+      where: { processedAt: { lt: cutoff } },
+    });
+    if (result.count > 0) {
+      logger.info({ deleted: result.count, daysOld }, 'Очищены старые записи');
     }
-    return result.changes;
+    return result.count;
   }
 
-  close(): void {
-    this.db.close();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS orders (
-        order_id    TEXT NOT NULL,
-        source      TEXT NOT NULL DEFAULT '',
-        title       TEXT DEFAULT '',
-        score       INTEGER DEFAULT 0,
-        link        TEXT DEFAULT '',
-        pitch       TEXT DEFAULT '',
-        blacklisted INTEGER DEFAULT 0,
-        processed_at TEXT DEFAULT (datetime('now')),
-        PRIMARY KEY (order_id, source)
-      );
-      CREATE INDEX IF NOT EXISTS idx_orders_processed ON orders(processed_at);
-    `);
-    // Миграции для существующих БД
-    for (const sql of [
-      `ALTER TABLE orders ADD COLUMN pitch TEXT DEFAULT ''`,
-      `ALTER TABLE orders ADD COLUMN reminded_at TEXT DEFAULT NULL`,
-      `ALTER TABLE orders ADD COLUMN tags TEXT DEFAULT ''`,
-      `ALTER TABLE orders ADD COLUMN pitch_b TEXT DEFAULT ''`,
-    ]) {
-      try { this.db.exec(sql); } catch { /* колонка уже есть */ }
-    }
-
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS settings (
-        key   TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `);
+  async close(): Promise<void> {
+    await this.prisma.$disconnect();
   }
 }
