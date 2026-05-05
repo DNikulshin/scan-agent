@@ -8,14 +8,11 @@ import type {
   DynamicSettings,
 } from "../core/storage";
 import type { ScoredOrder, Notifier } from "../types";
-
-const SOURCE_LABEL: Record<string, string> = {
-  kwork: "Kwork",
-  fl: "FL.ru",
-  freelanceru: "Freelance.ru",
-  habr: "Habr",
-  hh: "HH.ru",
-};
+import {
+  buildOrderMessage,
+  buildReminderMessage,
+  esc,
+} from "./telegram-format";
 
 type PitchChoosenCallback = (
   orderId: string,
@@ -37,159 +34,29 @@ export class TelegramNotifier implements Notifier {
   }
 
   async send(scored: ScoredOrder): Promise<void> {
-    // Роутинг по источнику
-    if (scored.order.source === "hh") {
-      return this.sendVacancy(scored);
-    }
-    if (scored.order.source === "fl" && !config.fl.generatePitch) {
-      return this.sendFlOrder(scored);
-    }
-    return this.sendFreelanceOrder(scored);
-  }
-
-  /** FL.ru — упрощённое сообщение без вариантов питча */
-  private async sendFlOrder(scored: ScoredOrder): Promise<void> {
-    const { order, score } = scored;
-    const stars = "⭐".repeat(Math.min(Math.round(score.score / 2), 5));
-    const tags = scored.tags?.length ? scored.tags.join(", ") : null;
-
-    const lines = [
-      `🔵 <b>${esc(order.title)}</b>`,
-      ``,
-      `💰 Бюджет: ${esc(order.price)}`,
-      `📊 Предложений: ${order.offersCount} | 🏪 FL.ru`,
-      `${stars} Оценка: <b>${score.score}/10</b>`,
-      ``,
-      `🧠 <b>Почему брать:</b>`,
-      esc(score.reason),
-    ];
-
-    if (order.desc) {
-      lines.push(
-        ``,
-        `📝 ${esc(order.desc.slice(0, 200))}${order.desc.length > 200 ? "..." : ""}`,
-      );
-    }
-
-    if (tags) {
-      lines.push(``, `🏷️ ${esc(tags)}`);
-    }
-
-    lines.push(``, `🔗 <a href="${order.link}">Открыть на FL.ru</a>`);
-
-    // Только кнопка "Пропустить" — без вариантов питча
-    const keyboard = [
-      [
-        {
-          text: "⏭ Пропустить",
-          callback_data: `skip:${order.source}:${order.id}`,
-        },
-      ],
-    ];
-
-    await this.bot.sendMessage(config.telegram.chatId, lines.join("\n"), {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: keyboard },
+    const msg = buildOrderMessage(scored);
+    await this.bot.sendMessage(config.telegram.chatId, msg.text, {
+      parse_mode: msg.parse_mode,
+      link_preview_options: msg.link_preview_options,
+      reply_markup: msg.reply_markup,
     });
-
     logger.info(
-      { orderId: order.id, source: "fl", score: score.score },
-      "[FL] Уведомление отправлено в Telegram (без питча)",
-    );
-  }
-
-  /** Стандартный заказ с фриланс-биржи (с питчем) */
-  private async sendFreelanceOrder(scored: ScoredOrder): Promise<void> {
-    const { order, score, pitch } = scored;
-    const source = SOURCE_LABEL[order.source] ?? order.source;
-    const stars = "⭐".repeat(Math.min(Math.round(score.score / 2), 5));
-    const hasPitchB = !!scored.pitchB;
-
-    const lines = [
-      `🔥 <b>${esc(order.title)}</b>`,
-      ``,
-      `💰 Бюджет: ${esc(order.price)}`,
-      `📊 Предложений: ${order.offersCount} | 🏪 ${source}`,
-      `${stars} Оценка: <b>${score.score}/10</b>`,
-      ``,
-      `🧠 <b>Почему брать:</b>`,
-      esc(score.reason),
-      ``,
-      `✍️ <b>Вариант 1</b> <i>(тап — скопировать):</i>`,
-      `<code>${esc(pitch.hook)}\n\n${esc(pitch.pitch)}</code>`,
-    ];
-
-    if (hasPitchB) {
-      lines.push(
-        ``,
-        `✍️ <b>Вариант 2</b>`,
-        `<code>${esc(scored.pitchB!.hook)}\n\n${esc(scored.pitchB!.pitch)}</code>`,
-      );
-    }
-
-    lines.push(``, `🔗 <a href="${order.link}">${esc(order.title)}</a>`);
-
-    const callbackSkip = `skip:${order.source}:${order.id}`;
-    const keyboard = hasPitchB
-      ? [
-          [
-            {
-              text: "✅ Вариант 1",
-              callback_data: `pick1:${order.source}:${order.id}`,
-            },
-            {
-              text: "✅ Вариант 2",
-              callback_data: `pick2:${order.source}:${order.id}`,
-            },
-          ],
-          [{ text: "⏭ Пропустить", callback_data: callbackSkip }],
-        ]
-      : [[{ text: "⏭ Пропустить", callback_data: callbackSkip }]];
-
-    await this.bot.sendMessage(config.telegram.chatId, lines.join("\n"), {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: keyboard },
-    });
-
-    logger.info(
-      { orderId: order.id, source: order.source, score: score.score },
+      {
+        orderId: scored.order.id,
+        source: scored.order.source,
+        score: scored.score.score,
+      },
       "Уведомление отправлено в Telegram",
     );
   }
 
   async sendReminder(order: ReminderOrder): Promise<void> {
-    const source = SOURCE_LABEL[order.source] ?? order.source;
-    const stars = "⭐".repeat(Math.min(Math.round(order.score / 2), 5));
-
-    const lines = [
-      `⏰ <b>Напоминание</b> — заказ ещё не рассмотрен`,
-      ``,
-      `🔥 <b>${esc(order.title)}</b>`,
-      `${stars} Оценка: <b>${order.score}/10</b> | 🏪 ${source}`,
-    ];
-
-    if (order.pitch) {
-      lines.push(``, `✍️ <code>${esc(order.pitch)}</code>`);
-    }
-    lines.push(``, `🔗 <a href="${order.link}">${esc(order.title)}</a>`);
-
-    await this.bot.sendMessage(config.telegram.chatId, lines.join("\n"), {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "⏭ Пропустить",
-              callback_data: `skip:${order.source}:${order.order_id}`,
-            },
-          ],
-        ],
-      },
+    const msg = buildReminderMessage(order);
+    await this.bot.sendMessage(config.telegram.chatId, msg.text, {
+      parse_mode: msg.parse_mode,
+      link_preview_options: msg.link_preview_options,
+      reply_markup: msg.reply_markup,
     });
-
     logger.info(
       { orderId: order.order_id, source: order.source },
       "Напоминание отправлено в Telegram",
@@ -264,7 +131,10 @@ export class TelegramNotifier implements Notifier {
           const settings = await storage.getSettings();
           if (!settings.stopWords.includes(word)) {
             settings.stopWords.push(word);
-            await storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
+            await storage.setSetting(
+              "stopWords",
+              JSON.stringify(settings.stopWords),
+            );
           }
           await this.bot.sendMessage(
             config.telegram.chatId,
@@ -277,7 +147,10 @@ export class TelegramNotifier implements Notifier {
             throw new Error("Укажите слово. Пример: /setstop remove реферат");
           const settings = await storage.getSettings();
           settings.stopWords = settings.stopWords.filter((w) => w !== word);
-          await storage.setSetting("stopWords", JSON.stringify(settings.stopWords));
+          await storage.setSetting(
+            "stopWords",
+            JSON.stringify(settings.stopWords),
+          );
           await this.bot.sendMessage(
             config.telegram.chatId,
             `✅ Стоп-слово удалено: <b>${esc(word)}</b>`,
@@ -328,7 +201,11 @@ export class TelegramNotifier implements Notifier {
       } else if (action === "pick1" || action === "pick2") {
         try {
           const variant = action === "pick1" ? "a" : "b";
-          const chosen = await this.storage!.choosePitch(orderId, source, variant);
+          const chosen = await this.storage!.choosePitch(
+            orderId,
+            source,
+            variant,
+          );
 
           if (chosen && this.onPitchChosen) {
             await this.onPitchChosen(
@@ -377,50 +254,6 @@ export class TelegramNotifier implements Notifier {
   stopCallbackListener(): void {
     this.bot.stopPolling();
   }
-
-  private async sendVacancy(scored: ScoredOrder): Promise<void> {
-    const { order, score } = scored;
-    const employer = order.meta?.employer ?? "";
-    const city = order.meta?.city ?? "";
-
-    const starCount = Math.min(5, Math.round(score.score / 2));
-    const stars = starCount > 0 ? "⭐".repeat(starCount) : "☆";
-
-    const lines: (string | null)[] = [
-      `💼 <b>${esc(order.title)}</b>`,
-      ``,
-      employer ? `🏢 ${esc(employer)}` : null,
-      city ? `📍 ${esc(city)}` : null,
-      `💰 Зарплата: ${esc(order.price)}`,
-      ``,
-      `${stars} Keyword score: <b>${score.score}/10</b>`,
-      score.reason ? `🎯 <i>${esc(score.reason)}</i>` : null,
-      ``,
-      `🔗 <a href="${order.link}">Открыть вакансию на HH</a>`,
-    ];
-
-    const text = lines.filter(Boolean).join("\n");
-
-    await this.bot.sendMessage(config.telegram.chatId, text, {
-      parse_mode: "HTML",
-      link_preview_options: { is_disabled: true },
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "⏭ Пропустить",
-              callback_data: `skip:${order.source}:${order.id}`,
-            },
-          ],
-        ],
-      },
-    });
-
-    logger.info(
-      { orderId: order.id, source: "hh", score: score.score },
-      "HH вакансия отправлена в Telegram",
-    );
-  }
 }
 
 function formatSettings(s: DynamicSettings): string {
@@ -456,11 +289,4 @@ function formatStats(s: StatsResult): string {
     ``,
     `💾 В базе: ${s.total_count} заказов`,
   ].join("\n");
-}
-
-function esc(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
 }
