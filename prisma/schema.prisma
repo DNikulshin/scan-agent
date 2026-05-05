@@ -94,3 +94,24 @@ model RunMetric {
   @@index([startedAt])
   @@map("run_metrics")
 }
+
+model NotificationJob {
+  id            String    @id @default(uuid()) @db.Uuid
+  channel       String // 'telegram' | 'push'
+  target        String? // push: endpoint; telegram: null
+  payload       Json
+  orderId       String?   @map("order_id")
+  status        String    @default("pending") // pending | sending | done | failed
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(8) @map("max_attempts")
+  nextAttemptAt DateTime  @default(now()) @map("next_attempt_at")
+  lockedAt      DateTime? @map("locked_at")
+  lockedBy      String?   @map("locked_by")
+  lastError     String?   @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  doneAt        DateTime? @map("done_at")
+
+  @@index([status, nextAttemptAt])
+  @@index([orderId])
+  @@map("notification_jobs")
+}

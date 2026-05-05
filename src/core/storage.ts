@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from '@prisma/client';
 
 import { config } from '../config';
 import { logger } from '../utils/logger';
+import { prisma as defaultPrisma } from './prisma';
 
 export interface DynamicSettings {
   minPrice: number;
@@ -51,7 +52,7 @@ export class Storage {
   private prisma: PrismaClient;
 
   constructor(prisma?: PrismaClient) {
-    this.prisma = prisma ?? new PrismaClient();
+    this.prisma = prisma ?? defaultPrisma;
     logger.info('Prisma Postgres хранилище инициализировано');
   }
 

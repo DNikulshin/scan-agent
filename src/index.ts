@@ -14,7 +14,7 @@ import { calcKeywordScore, FULLSTACK_SCORING } from "./core/keyword-scorer";
 import { TelegramNotifier } from "./notifiers/telegram";
 import { SupabaseNotifier } from "./notifiers/supabase";
 import { DashboardNotifier } from "./notifiers/dashboard";
-import { PushNotifier } from "./notifiers/push";
+import { enqueueNotifications, enqueueReminder } from "./core/notifications";
 import { logger } from "./utils/logger";
 import type { Order, Parser, ScoredOrder } from "./types";
 
@@ -39,7 +39,6 @@ async function run(): Promise<void> {
       await dashboard.updatePitch(orderId, source, hook, pitch);
     },
   );
-  const push = new PushNotifier();
 
   telegram.startCallbackListener();
   await storage.cleanup(30);
@@ -47,7 +46,7 @@ async function run(): Promise<void> {
   const settings = await storage.getSettings();
   logger.info({ settings }, "Запуск агента");
   let totalNew = 0;
-  let totalSent = 0;
+  let totalEnqueued = 0;
 
   try {
     for (const parser of parsers) {
@@ -181,25 +180,34 @@ async function run(): Promise<void> {
           };
         }
 
-        let sent = false;
-
+        // markProcessed + enqueue в outbox: если хоть один шаг упадёт,
+        // заказ останется без processed и попадёт в следующий cron-прогон.
+        // Доставка (Telegram, push) идёт асинхронно через dashboard worker
+        // с retry/backoff — см. dashboard/lib/notifications/dispatcher.ts.
         try {
-          await telegram.send(scored);
-          sent = true;
-          totalSent++;
-          await push.sendToAll({
-            title: `Новый заказ: ${scored.order.title}`,
-            body: `Оценка: ${scored.score.score}/10`,
-            icon: "/icons/icon-192.svg",
-            data: { orderId: scored.order.id },
+          await storage.markProcessed({
+            orderId: order.id,
+            source: order.source,
+            title: order.title,
+            score: scored.score.score,
+            link: order.link,
+            pitch: scored.pitch.hook
+              ? `${scored.pitch.hook}\n\n${scored.pitch.pitch}`
+              : "",
+            pitchB: scored.pitchB ? JSON.stringify(scored.pitchB) : undefined,
+            tags: scored.tags,
           });
+          await enqueueNotifications(scored);
+          totalEnqueued++;
         } catch (err) {
           logger.error(
             { err, orderId: order.id },
-            "Ошибка отправки в Telegram",
+            "Ошибка enqueue уведомлений (заказ не помечен processed — повторим в следующем прогоне)",
           );
+          continue;
         }
 
+        // Опциональные каналы (HTTP-нотификаторы — будут удалены после Шага 5).
         try {
           await supabase.send(scored);
         } catch (err) {
@@ -218,21 +226,6 @@ async function run(): Promise<void> {
           );
         }
 
-        if (sent) {
-          await storage.markProcessed({
-            orderId: order.id,
-            source: order.source,
-            title: order.title,
-            score: scored.score.score,
-            link: order.link,
-            pitch: scored.pitch.hook
-              ? `${scored.pitch.hook}\n\n${scored.pitch.pitch}`
-              : "",
-            pitchB: scored.pitchB ? JSON.stringify(scored.pitchB) : undefined,
-            tags: scored.tags,
-          });
-        }
-
         await new Promise((r) => setTimeout(r, config.delays.betweenOrders));
       }
     }
@@ -240,22 +233,22 @@ async function run(): Promise<void> {
     const unreminded = await storage.getUnremindedOrders(config.filter.minScore, 2);
     for (const order of unreminded) {
       try {
-        await telegram.sendReminder(order);
+        await enqueueReminder(order);
         await storage.markReminded(order.order_id, order.source);
       } catch (err) {
         logger.error(
           { err, orderId: order.order_id },
-          "Ошибка отправки напоминания",
+          "Ошибка enqueue напоминания",
         );
       }
     }
     if (unreminded.length > 0) {
-      logger.info({ count: unreminded.length }, "Напоминания отправлены");
+      logger.info({ count: unreminded.length }, "Напоминания поставлены в outbox");
     }
 
     const dbSize = await storage.count();
     logger.info(
-      { totalNew, totalSent, dbSize },
+      { totalNew, totalEnqueued, dbSize },
       "Цикл завершён",
     );
 
