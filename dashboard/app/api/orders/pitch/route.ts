@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { prisma } from '@/lib/db';
 
 function checkAuth(req: NextRequest): boolean {
   const key = process.env.DASHBOARD_API_KEY;
@@ -14,9 +14,9 @@ export async function POST(req: NextRequest) {
   }
 
   const { order_id, source, hook, pitch } = await req.json();
-  await db.query(
-    `UPDATE orders SET hook = $1, pitch = $2 WHERE order_id = $3 AND source = $4`,
-    [hook, pitch, order_id, source],
-  );
+  await prisma.order.update({
+    where: { orderId_source: { orderId: order_id, source } },
+    data: { hook, pitch },
+  });
   return NextResponse.json({ ok: true });
 }

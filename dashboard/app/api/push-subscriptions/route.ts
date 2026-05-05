@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { prisma } from '@/lib/db';
 
 function checkAuth(req: NextRequest): boolean {
   const key = process.env.DASHBOARD_API_KEY;
@@ -12,19 +12,20 @@ export async function GET(req: NextRequest) {
   if (!checkAuth(req)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
-  const { rows } = await db.query('SELECT endpoint, p256dh, auth FROM push_subscriptions');
+  const rows = await prisma.pushSubscription.findMany({
+    select: { endpoint: true, p256dh: true, auth: true },
+  });
   return NextResponse.json(rows);
 }
 
 // POST /api/push-subscriptions — сохранить подписку из браузера
 export async function POST(req: NextRequest) {
   const { endpoint, p256dh, auth } = await req.json();
-  await db.query(
-    `INSERT INTO push_subscriptions (endpoint, p256dh, auth)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (endpoint) DO UPDATE SET p256dh = EXCLUDED.p256dh, auth = EXCLUDED.auth`,
-    [endpoint, p256dh, auth],
-  );
+  await prisma.pushSubscription.upsert({
+    where: { endpoint },
+    create: { endpoint, p256dh, auth },
+    update: { p256dh, auth },
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -34,6 +35,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
   const { endpoint } = await req.json();
-  await db.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
+  await prisma.pushSubscription.deleteMany({ where: { endpoint } });
   return NextResponse.json({ ok: true });
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { db } from '@/lib/db';
+import { prisma } from '@/lib/db';
 
 function checkAuth(req: NextRequest): boolean {
   const key = process.env.DASHBOARD_API_KEY;
@@ -16,8 +16,9 @@ export async function POST(req: NextRequest) {
   if (confirm !== 'RESET') {
     return NextResponse.json({ error: 'Confirmation required' }, { status: 400 });
   }
-  const { rowCount } = await db.query(
-    `UPDATE orders SET outcome = 'pending' WHERE outcome IN ('won', 'lost')`,
-  );
-  return NextResponse.json({ ok: true, updated: rowCount });
+  const { count } = await prisma.order.updateMany({
+    where: { outcome: { in: ['won', 'lost'] } },
+    data: { outcome: 'pending' },
+  });
+  return NextResponse.json({ ok: true, updated: count });
 }
