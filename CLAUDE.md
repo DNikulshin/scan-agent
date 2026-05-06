@@ -8,35 +8,50 @@
 ## 📚 Дополнительные файлы
 
 Подгружай по мере необходимости, не держи в контексте по умолчанию:
-- [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — **активный план** миграции на Prisma Postgres (читать в начале сессии)
-- [docs/CHANGELOG.md](docs/CHANGELOG.md) — лог изменений (только при поиске исторического контекста)
-- [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD, инфра-нюансы (только при работе с деплоем)
+- [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — план миграции БД (Шаги 1–4 ✅, 5–9 ⏳).
+- `~/.claude/plans/sunny-drifting-token.md` — **активный план** надёжной доставки уведомлений (outbox + worker + SSE). Фаза 1 ✅, Фаза 2 — следующая.
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — лог изменений (только при поиске исторического контекста).
+- [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD, инфра-нюансы (только при работе с деплоем).
 
 ---
 
 ## 🚧 Текущая задача (in progress)
 
-**Миграция на единую Prisma Postgres БД + метрики прогона.**
+**Безупречная доставка уведомлений: outbox в Postgres + worker в dashboard + SSE.**
 
-План: [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — читать целиком, прежде чем продолжать.
+План: `~/.claude/plans/sunny-drifting-token.md` — читать целиком перед продолжением. Архитектура: агент пишет `NotificationJob` записи в outbox синхронно с `markProcessed`; dashboard-контейнер 24/7 крутит dispatcher с `SELECT FOR UPDATE SKIP LOCKED`, retry-backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h]`, изоляция per-channel; для real-time в открытой вкладке — SSE через `pg_notify('order_new')`.
 
-**Прогресс:**
-- ✅ Шаг 1 — Prisma Postgres подключён, `DATABASE_URL` в `.env` (pooled).
-- ✅ Шаг 2 — [prisma/schema.prisma](prisma/schema.prisma) с 4 моделями (Order, Setting, PushSubscription, RunMetric с расширениями Блока 1). Миграция `20260505174149_init` применена.
-- ✅ Шаг 3 — [src/core/storage.ts](src/core/storage.ts) на PrismaClient (async). Callers в [src/index.ts](src/index.ts) и [src/notifiers/telegram.ts](src/notifiers/telegram.ts) проставлены `await`. `count` getter → `count()`. `better-sqlite3` удалён. Прогон 2026-05-05: `totalNew=186, totalSent=8, dbSize=168` — БД пишется, дедуп ОК.
-- ⏳ Шаг 4 (следующий) — `dashboard/lib/db.ts` + API на Prisma.
-- Дальше: удалить `src/notifiers/dashboard.ts` → `src/core/metrics.ts` + инструментирование `src/index.ts` → `/stats` страница + `/api/metrics/export` → workflow.
+**Прогресс по плану уведомлений:**
+- ✅ Фаза 1 — outbox + enqueue в агенте:
+  - Модель `NotificationJob` в [prisma/schema.prisma](prisma/schema.prisma); миграция `20260505225113_add_notification_jobs` с двумя `pg_notify`-триггерами (`order_new`, `notification_job_new`). Применена.
+  - [src/notifiers/telegram-format.ts](src/notifiers/telegram-format.ts) — pure-форматтеры (`buildOrderMessage`, `buildReminderMessage`). [src/notifiers/telegram.ts](src/notifiers/telegram.ts) — теперь тонкая обёртка.
+  - [src/core/prisma.ts](src/core/prisma.ts) — общий PrismaClient. [src/core/notifications.ts](src/core/notifications.ts) — `enqueueNotifications` (1 telegram + N push) и `enqueueReminder`.
+  - [src/index.ts](src/index.ts) — inline `telegram.send`/`push.sendToAll` заменены на `markProcessed → enqueueNotifications`. Push-инстанс из агента удалён. Reminder через outbox.
+  - [scripts/enqueue-smoke.ts](scripts/enqueue-smoke.ts) — sanity-check (прогон 2026-05-05: `delta=1`, ОК).
+- ⏳ Фаза 2 (следующая) — dashboard worker:
+  - `dashboard/lib/notifications/dispatcher.ts` (poll-loop + `claimBatch` через raw SQL `SELECT FOR UPDATE SKIP LOCKED`)
+  - `dashboard/lib/notifications/channels/{telegram,push}.ts` (per-channel send, retryable/fatal errors, `web-push` с `TTL=2592000`, `urgency: 'high'`, `topic: orderId`; 410/404/403 → удалить подписку)
+  - `dashboard/instrumentation.ts` (Next.js 16 register hook → запускает dispatcher)
+  - `dashboard/app/api/health/notifications/route.ts` (counts по статусу + последние failed)
+  - В `dashboard/package.json` вернуть `pg`, `@types/pg`, добавить `web-push`, `@types/web-push`
+- Фаза 3 — SSE (`/api/orders/stream` + `RealtimeOrdersListener` компонент с `EventSource` → `queryClient.invalidateQueries`).
+- Фаза 4 — cleanup: удалить `src/notifiers/push.ts`, обновить `sw.js` (`tag: orderId, renotify: true`), CHANGELOG, CLAUDE.md.
+
+**Параллельный трек — Postgres-миграция (план `docs/plans/postgres-migration.md`):**
+- ✅ Шаги 1–3 — Prisma Postgres + storage переписан, `better-sqlite3` удалён.
+- ✅ Шаг 4 — dashboard на Prisma: [dashboard/lib/db.ts](dashboard/lib/db.ts) (singleton + `serializeOrder` для snake_case API), все API routes (`orders`, `pitch`, `reset`, `push-subscriptions`), `actions.ts`. **`@prisma/client` намеренно НЕ в `dashboard/package.json`** — иначе ставится заглушка с `PrismaClient = any`; резолвится из корневого `node_modules` через Node module resolution. Это критично для type-check и Next.js standalone.
+- ⏳ Шаги 5–9 — отложены до Фазы 4 плана уведомлений (удалить `src/notifiers/dashboard.ts` уже не нужно после outbox).
 
 **Принятые решения:**
-- БД: Prisma Postgres (managed). ORM: Prisma 6.x (Prisma 7 убрали `datasource.url` в schema — несовместимо с планом, не используем).
-- Метрики: per-run в `RunMetric` + ручные статусы заказа (`status`, `outcome`, `applied_at` уже в схеме) + UI-страница `/stats` + MD-экспорт `/api/metrics/export` (all-time). Подробнее: [Блок 1 в `~/.claude/plans/humming-enchanting-castle.md`].
-- Cron в `.github/workflows/scan-agent.yml` оставить как есть.
+- БД очереди: Postgres (выбран вместо Redis/BullMQ — для 10–15 push/день overkill; `pg_notify` + `SKIP LOCKED` дают всё нужное без новой инфры).
+- Real-time: SSE с подпиской на `pg_notify`. **LISTEN/NOTIFY требует non-pooled `DATABASE_URL`** через прямой `pg.Client` — Prisma Postgres даёт оба URL.
+- Push fan-out: одна job на endpoint (а не одна общая) — потеря одной не влияет на остальные.
+- Worker singleton — через `instrumentation.ts` + `globalThis` guard. Если когда-то 2 реплики dashboard — `SKIP LOCKED` всё равно атомарен.
 
 **Нюансы:**
-- `pg` есть только в `dashboard/node_modules/` — для ad-hoc проверок коннекта.
-- `HTTP_PROXY` в dev может мешать `prisma migrate`/`generate` — все Prisma-команды запускать с `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy npx prisma ...`.
-- Push-нотификатор (`src/notifiers/push.ts`) после миграции: оставить HTTP к dashboard или подключить к БД напрямую — отложено.
-- `migrations/001_add_hh_fields.sql` и `supabase/migration.sql` пока не удаляем — снесём после переписывания storage и dashboard на Prisma.
+- `HTTP_PROXY` в dev ломает `prisma migrate`/`generate` — запускать с `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy npx prisma ...`.
+- Telegram polling **остаётся в агенте** (callback-кнопки `/setrate`, `/setscore`, `pick1/pick2/skip`). Перенос polling'а в dashboard — отдельная задача, не в этом плане.
+- `migrations/001_add_hh_fields.sql` и `supabase/migration.sql` — снести после Фазы 4.
 
 ---
 
