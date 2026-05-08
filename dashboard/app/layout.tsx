@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Geist } from 'next/font/google';
 import './globals.css';
 import { PushNotificationManager } from '@/components/PushNotificationManager';
+import { RealtimeOrdersListener } from '@/components/RealtimeOrdersListener';
 import { ClientProviders } from '@/components/ClientProviders';
 
 const geist = Geist({ subsets: ['latin'] });
@@ -43,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className={`${geist.className} bg-gray-950 text-gray-100 min-h-screen`}>
         <ClientProviders>
           <PushNotificationManager />
+          <RealtimeOrdersListener />
           {children}
         </ClientProviders>
       </body>

@@ -9,7 +9,7 @@
 
 Подгружай по мере необходимости, не держи в контексте по умолчанию:
 - [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — план миграции БД (Шаги 1–4 ✅, 5–9 ⏳).
-- `~/.claude/plans/sunny-drifting-token.md` — **активный план** надёжной доставки уведомлений (outbox + worker + SSE). Фаза 1 ✅, Фаза 2 — следующая.
+- `~/.claude/plans/sunny-drifting-token.md` — **активный план** надёжной доставки уведомлений (outbox + worker + SSE). Фазы 1–3 ✅, Фаза 4 (cleanup + sw.js) — следующая.
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — лог изменений (только при поиске исторического контекста).
 - [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD, инфра-нюансы (только при работе с деплоем).
 
@@ -28,14 +28,20 @@
   - [src/core/prisma.ts](src/core/prisma.ts) — общий PrismaClient. [src/core/notifications.ts](src/core/notifications.ts) — `enqueueNotifications` (1 telegram + N push) и `enqueueReminder`.
   - [src/index.ts](src/index.ts) — inline `telegram.send`/`push.sendToAll` заменены на `markProcessed → enqueueNotifications`. Push-инстанс из агента удалён. Reminder через outbox.
   - [scripts/enqueue-smoke.ts](scripts/enqueue-smoke.ts) — sanity-check (прогон 2026-05-05: `delta=1`, ОК).
-- ⏳ Фаза 2 (следующая) — dashboard worker:
-  - `dashboard/lib/notifications/dispatcher.ts` (poll-loop + `claimBatch` через raw SQL `SELECT FOR UPDATE SKIP LOCKED`)
-  - `dashboard/lib/notifications/channels/{telegram,push}.ts` (per-channel send, retryable/fatal errors, `web-push` с `TTL=2592000`, `urgency: 'high'`, `topic: orderId`; 410/404/403 → удалить подписку)
-  - `dashboard/instrumentation.ts` (Next.js 16 register hook → запускает dispatcher)
-  - `dashboard/app/api/health/notifications/route.ts` (counts по статусу + последние failed)
-  - В `dashboard/package.json` вернуть `pg`, `@types/pg`, добавить `web-push`, `@types/web-push`
-- Фаза 3 — SSE (`/api/orders/stream` + `RealtimeOrdersListener` компонент с `EventSource` → `queryClient.invalidateQueries`).
-- Фаза 4 — cleanup: удалить `src/notifiers/push.ts`, обновить `sw.js` (`tag: orderId, renotify: true`), CHANGELOG, CLAUDE.md.
+- ✅ Фаза 2 — dashboard worker:
+  - [dashboard/lib/notifications/dispatcher.ts](dashboard/lib/notifications/dispatcher.ts) — singleton (через `globalThis`), poll каждые `NOTIFICATIONS_POLL_INTERVAL_MS` (def 5000), batch `NOTIFICATIONS_BATCH_LIMIT` (def 20). `claimBatch` — атомарный `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` с инкрементом `attempts`, lock'ом и подбором зависших `sending` (старше 15 мин). `processJob` через `Promise.allSettled` (per-job изоляция). Backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h, 24h]`; `RetryableError.retryAfterSec` имеет приоритет (для Telegram 429); `FatalError` или `attempts ≥ maxAttempts` → `failed`.
+  - [dashboard/lib/notifications/errors.ts](dashboard/lib/notifications/errors.ts) — `RetryableError` / `FatalError`.
+  - [dashboard/lib/notifications/channels/telegram.ts](dashboard/lib/notifications/channels/telegram.ts) — прямой `fetch` на Bot API (без `node-telegram-bot-api`). 429→Retryable(retry_after), 5xx/network→Retryable, 4xx→Fatal.
+  - [dashboard/lib/notifications/channels/push.ts](dashboard/lib/notifications/channels/push.ts) — `web-push` с `TTL=2592000`, `Urgency: high`, `Topic: <orderId без дефисов>`. 410/404/403 → `prisma.pushSubscription.deleteMany` + Fatal; 429/5xx/timeout → Retryable.
+  - [dashboard/instrumentation.ts](dashboard/instrumentation.ts) — Next.js 16 `register()`, отсекает edge через `NEXT_RUNTIME==='nodejs'`. Kill-switch: `NOTIFICATIONS_DISPATCHER_DISABLED=true`.
+  - [dashboard/app/api/health/notifications/route.ts](dashboard/app/api/health/notifications/route.ts) — `GET` (Bearer `DASHBOARD_API_KEY`): counts по статусу за 24ч + oldest pending + last 10 failed.
+  - [dashboard/package.json](dashboard/package.json) — добавлены `web-push` + `@types/web-push`.
+- ✅ Фаза 3 — SSE:
+  - [dashboard/package.json](dashboard/package.json) — добавлены `pg` + `@types/pg` (для LISTEN/NOTIFY — Prisma не умеет, idle-коннекты возвращаются в pgBouncer-пул и теряют подписку).
+  - [dashboard/app/api/orders/stream/route.ts](dashboard/app/api/orders/stream/route.ts) — SSE endpoint: `runtime='nodejs'`, прямой `pg.Client` на `DATABASE_URL_DIRECT` (fallback на `DATABASE_URL`), `LISTEN order_new`, `event: order_new`/`event: ready`, heartbeat-comment каждые 25с, cleanup на `req.signal.aborted` + `cancel()` стрима + `client.on('error')`. Заголовки: `text/event-stream`, `no-cache`, `X-Accel-Buffering: no` (отключает буферизацию nginx/Caddy).
+  - [dashboard/components/RealtimeOrdersListener.tsx](dashboard/components/RealtimeOrdersListener.tsx) — `EventSource` на `/api/orders/stream`, на `order_new` → `queryClient.invalidateQueries({queryKey:['orders']})`. Auto-reconnect с backoff 1s→30s; reset до 1s на `event: ready`.
+  - [dashboard/app/layout.tsx](dashboard/app/layout.tsx) — listener подключён внутри `ClientProviders` рядом с `PushNotificationManager` (нужен `QueryClientProvider` контекст; в `page.tsx` он недоступен напрямую).
+- Фаза 4 — cleanup: удалить `src/notifiers/push.ts`, обновить `sw.js` (`tag: orderId, renotify: true`, deep-link click), CHANGELOG, CLAUDE.md.
 
 **Параллельный трек — Postgres-миграция (план `docs/plans/postgres-migration.md`):**
 - ✅ Шаги 1–3 — Prisma Postgres + storage переписан, `better-sqlite3` удалён.
@@ -159,6 +165,8 @@ Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные и�
 
 **Dashboard** (env в `docker-compose.yml`):
 - `DATABASE_URL`, `VAPID_PRIVATE_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `DASHBOARD_API_KEY`
+- **Новое для Фазы 2 worker'а** (нужно прокинуть перед деплоем): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, опционально `VAPID_SUBJECT` (def `mailto:admin@example.com`), `NOTIFICATIONS_POLL_INTERVAL_MS`, `NOTIFICATIONS_BATCH_LIMIT`, kill-switch `NOTIFICATIONS_DISPATCHER_DISABLED`.
+- **Для SSE-роута** (`/api/orders/stream`): `DATABASE_URL_DIRECT` — non-pooled URL для прямого `pg.Client` (LISTEN/NOTIFY требует постоянной сессии, pgBouncer/Accelerate ломает подписку). Если не задан — fallback на `DATABASE_URL` (для локального dev на голом Postgres). Prisma Postgres даёт оба URL.
 
 ## Деплой и инфра
 

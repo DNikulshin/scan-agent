@@ -1,7 +1,18 @@
+import path from "node:path";
+
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Корнем для Turbopack ставим родительскую папку (scan-agent/), а не
+  // dashboard/. Это нужно потому что @prisma/client намеренно НЕ в
+  // dashboard/package.json (см. корневой CLAUDE.md) — клиент резолвится из
+  // корневого node_modules через стандартный Node module resolution. Если
+  // ограничить root самой dashboard/, Turbopack не пойдёт вверх и не найдёт
+  // @prisma/client. Заодно глушится warning про multiple lockfiles.
+  turbopack: {
+    root: path.resolve(process.cwd(), '..'),
+  },
   async headers() {
     return [
       {
