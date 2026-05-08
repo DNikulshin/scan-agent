@@ -22,6 +22,13 @@ export interface ScoreResult {
   reason: string;  // почему такая оценка
 }
 
+/** Расход OpenRouter за один (или суммарно несколько) вызов(а). */
+export interface AiUsage {
+  tokensIn: number;
+  tokensOut: number;
+  costUsd: number;
+}
+
 /** Результат генерации pitch */
 export interface PitchResult {
   hook: string;    // первая цепляющая фраза

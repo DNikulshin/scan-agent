@@ -4,7 +4,17 @@ import { config } from '../config';
 import { profile, getProfileContext } from '../profile';
 import { logger } from '../utils/logger';
 import { withRetry, isRetryableHttpError } from '../utils/retry';
-import type { Order, ScoreResult, PitchResult } from '../types';
+import type { AiUsage, Order, ScoreResult, PitchResult } from '../types';
+
+const ZERO_USAGE: AiUsage = { tokensIn: 0, tokensOut: 0, costUsd: 0 };
+
+function addUsage(a: AiUsage, b: AiUsage): AiUsage {
+  return {
+    tokensIn: a.tokensIn + b.tokensIn,
+    tokensOut: a.tokensOut + b.tokensOut,
+    costUsd: a.costUsd + b.costUsd,
+  };
+}
 
 // ── Zod-схемы для валидации AI-ответов ──
 
@@ -41,13 +51,18 @@ const SCORING_EXAMPLES = `
 
 // ── Вспомогательные функции ──
 
-/** Безопасный вызов OpenRouter API */
+interface OpenRouterCall {
+  text: string;
+  usage: AiUsage;
+}
+
+/** Безопасный вызов OpenRouter API. Возвращает text + usage (cost — best-effort через /generation). */
 async function callOpenRouter(params: {
   model: string;
   prompt: string;
   temperature: number;
   maxTokens?: number;
-}): Promise<string> {
+}): Promise<OpenRouterCall> {
   const { model, prompt, temperature, maxTokens = 800 } = params;
 
   const res = await axios.post(
@@ -70,8 +85,43 @@ async function callOpenRouter(params: {
   );
 
   const raw: string = res.data.choices[0]?.message?.content ?? '';
-  // Очистка от возможных markdown-обёрток
-  return raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+  const text = raw.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+
+  const id: string | undefined = res.data.id;
+  const inlineUsage = res.data.usage ?? {};
+  const tokensIn = Number(inlineUsage.prompt_tokens ?? 0);
+  const tokensOut = Number(inlineUsage.completion_tokens ?? 0);
+  // total_cost иногда уже есть в ответе chat/completions, но достоверно только в /generation.
+  const costUsd = await fetchGenerationCost(id);
+
+  return { text, usage: { tokensIn, tokensOut, costUsd } };
+}
+
+/**
+ * Тащит финальный cost из OpenRouter Generation API.
+ * Ничего не ломает, если API 404'нул, отстал по времени или вернул нечисловой total_cost —
+ * в этих случаях возвращает 0. Это одна из метрик, не критичная для pipeline'а.
+ */
+async function fetchGenerationCost(id: string | undefined): Promise<number> {
+  if (!id) return 0;
+
+  try {
+    const res = await withRetry(
+      () =>
+        axios.get('https://openrouter.ai/api/v1/generation', {
+          params: { id },
+          headers: { Authorization: `Bearer ${config.openrouter.apiKey}` },
+          proxy: false,
+          timeout: 5000,
+        }),
+      { maxAttempts: 2, label: 'generation-cost', shouldRetry: isRetryableHttpError },
+    );
+
+    const cost = Number(res.data?.data?.total_cost ?? 0);
+    return Number.isFinite(cost) && cost >= 0 ? cost : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /** Парсинг JSON с Zod-валидацией */
@@ -82,7 +132,12 @@ function parseAndValidate<T>(raw: string, schema: z.ZodSchema<T>): T {
 
 // ── Шаг 1: Скоринг (бесплатная модель) ──
 
-export async function scoreOrder(order: Order): Promise<ScoreResult | null> {
+export interface ScoreOutcome {
+  result: ScoreResult | null;
+  usage: AiUsage;
+}
+
+export async function scoreOrder(order: Order): Promise<ScoreOutcome> {
   const prompt = `Ты опытный разработчик. Оцени заказ/вакансию: подходит ли под мой стек?
 ВАЖНО: отвечай ТОЛЬКО на русском языке.
 
@@ -102,9 +157,11 @@ ${SCORING_EXAMPLES}
     config.openrouter.scoringFallback,
   ];
 
+  let usage: AiUsage = ZERO_USAGE;
+
   for (const model of models) {
     try {
-      const raw = await withRetry(
+      const call = await withRetry(
         () => callOpenRouter({
           model,
           prompt,
@@ -118,7 +175,8 @@ ${SCORING_EXAMPLES}
         },
       );
 
-      return parseAndValidate(raw, ScoreSchema);
+      usage = addUsage(usage, call.usage);
+      return { result: parseAndValidate(call.text, ScoreSchema), usage };
     } catch (error) {
       const isLast = model === models[models.length - 1];
 
@@ -128,16 +186,21 @@ ${SCORING_EXAMPLES}
       }
 
       logger.error({ err: error, orderId: order.id, title: order.title }, 'Скоринг провален');
-      return null;
+      return { result: null, usage };
     }
   }
 
-  return null;
+  return { result: null, usage };
 }
 
 // ── Шаг 2: Pitch (платная модель, только для высокого score) ──
 
-export async function generatePitch(order: Order, temperature?: number): Promise<PitchResult | null> {
+export interface PitchOutcome {
+  result: PitchResult | null;
+  usage: AiUsage;
+}
+
+export async function generatePitch(order: Order, temperature?: number): Promise<PitchOutcome> {
   const profileCtx = getProfileContext();
 
   const prompt = `Ты пишешь отклик на заказ с фриланс-биржи от имени разработчика.
@@ -163,7 +226,7 @@ ${profileCtx}
 {"hook": "цепляющая фраза на русском", "pitch": "полный отклик на русском"}`;
 
   try {
-    const raw = await withRetry(
+    const call = await withRetry(
       () => callOpenRouter({
         model: config.openrouter.pitchModel,
         prompt,
@@ -177,10 +240,10 @@ ${profileCtx}
       },
     );
 
-    return parseAndValidate(raw, PitchSchema);
+    return { result: parseAndValidate(call.text, PitchSchema), usage: call.usage };
   } catch (error) {
     logger.error({ err: error, orderId: order.id, title: order.title }, 'Pitch провален');
-    return null;
+    return { result: null, usage: ZERO_USAGE };
   }
 }
 
@@ -190,10 +253,14 @@ export interface AnalysisResult {
   score: ScoreResult;
   pitch: PitchResult;
   pitchB: PitchResult | null;
+  /** Суммарный usage всех вызовов: 1 score + до 2 pitch'ей. */
+  usage: AiUsage;
+  /** Сколько pitch-вызовов реально дошло до OpenRouter (для метрики `incPitchCall`). */
+  pitchCalls: number;
 }
 
 export async function analyzeOrder(order: Order, minScore?: number): Promise<AnalysisResult | null> {
-  const score = await scoreOrder(order);
+  const { result: score, usage: scoreUsage } = await scoreOrder(order);
 
   if (!score) {
     logger.warn({ orderId: order.id }, 'Ошибка скоринга — повторю позже');
@@ -209,17 +276,25 @@ export async function analyzeOrder(order: Order, minScore?: number): Promise<Ana
   logger.info({ orderId: order.id, score: score.score, title: order.title }, 'Прошёл скоринг');
 
   // Генерируем 2 варианта параллельно: сфокусированный (0.5) и креативный (0.9)
-  const [pitch, pitchB] = await Promise.all([
+  const [pitchOutcome, pitchBOutcome] = await Promise.all([
     generatePitch(order, 0.5),
     generatePitch(order, 0.9),
   ]);
 
-  if (!pitch) {
+  const usage = addUsage(addUsage(scoreUsage, pitchOutcome.usage), pitchBOutcome.usage);
+
+  if (!pitchOutcome.result) {
     logger.warn({ orderId: order.id }, 'Ошибка pitch — повторю позже');
     return null;
   }
 
-  return { score, pitch, pitchB };
+  return {
+    score,
+    pitch: pitchOutcome.result,
+    pitchB: pitchBOutcome.result,
+    usage,
+    pitchCalls: 2,
+  };
 }
 
 

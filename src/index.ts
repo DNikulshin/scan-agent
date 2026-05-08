@@ -3,6 +3,7 @@ import { Storage } from "./core/storage";
 import { getTrashReason } from "./core/filter";
 import { analyzeOrder, scoreOrder } from "./core/analyzer";
 import { extractTags } from "./core/tagger";
+import { RunMetrics } from "./core/metrics";
 import {
   KworkParser,
   FlParser,
@@ -45,21 +46,27 @@ async function run(): Promise<void> {
 
   const settings = await storage.getSettings();
   logger.info({ settings }, "Запуск агента");
+  const metrics = new RunMetrics();
   let totalNew = 0;
   let totalEnqueued = 0;
 
   try {
     for (const parser of parsers) {
       let orders: Order[];
+      const parserStart = Date.now();
       try {
         orders = await parser.fetchOrders();
       } catch (err) {
+        metrics.incError("parser");
+        metrics.setParserDuration(parser.name, Date.now() - parserStart);
         logger.error(
           { err, parser: parser.name },
           "Ошибка парсера — пропускаем",
         );
         continue;
       }
+      metrics.setParserDuration(parser.name, Date.now() - parserStart);
+      metrics.incParsed(parser.name, orders.length);
 
       for (const order of orders) {
         if (await storage.isProcessed(order.id, order.source)) continue;
@@ -68,6 +75,7 @@ async function run(): Promise<void> {
 
         const trashReason = getTrashReason(order, settings);
         if (trashReason) {
+          metrics.incFiltered();
           logger.debug(
             { orderId: order.id, parser: parser.name, reason: trashReason },
             "Мусор",
@@ -97,6 +105,7 @@ async function run(): Promise<void> {
             FULLSTACK_SCORING,
           );
           if (kw.excluded || kw.rawScore < config.hh.minKeywordScore) {
+            metrics.incLowScoreKeyword();
             logger.debug(
               {
                 orderId: order.id,
@@ -115,10 +124,17 @@ async function run(): Promise<void> {
             continue;
           }
 
-          const score = await scoreOrder(order);
-          if (!score) continue;
+          metrics.incScoringCall();
+          const { result: score, usage } = await scoreOrder(order);
+          metrics.addAiUsage(usage);
+          if (!score) {
+            metrics.incError("scoring");
+            continue;
+          }
+          metrics.recordScore(score.score);
 
           if (score.score < settings.minScore) {
+            metrics.incLowScoreAi();
             logger.info(
               { orderId: order.id, score: score.score },
               "[hh] Ниже порога — пропускаем",
@@ -142,10 +158,17 @@ async function run(): Promise<void> {
         } else if (order.source === "fl" && !config.fl.generatePitch) {
           // ── FL: AI score только, pitchGeneration отключён ──
           // Предфильтрация (hardExclude + skillsWeight) уже выполнена в FlParser
-          const score = await scoreOrder(order);
-          if (!score) continue;
+          metrics.incScoringCall();
+          const { result: score, usage } = await scoreOrder(order);
+          metrics.addAiUsage(usage);
+          if (!score) {
+            metrics.incError("scoring");
+            continue;
+          }
+          metrics.recordScore(score.score);
 
           if (score.score < settings.minScore) {
+            metrics.incLowScoreAi();
             logger.info(
               { orderId: order.id, score: score.score },
               "[FL] Ниже порога — пропускаем",
@@ -168,8 +191,17 @@ async function run(): Promise<void> {
           };
         } else {
           // ── Все остальные биржи: полный AI pipeline (score + pitch×2) ──
+          metrics.incScoringCall();
           const result = await analyzeOrder(order, settings.minScore);
-          if (!result) continue;
+          if (!result) {
+            // analyzeOrder сам логирует причину; на стороне метрик считаем
+            // как low-score-ai (он отсёк до pitch'а либо pitch упал).
+            metrics.incLowScoreAi();
+            continue;
+          }
+          metrics.recordScore(result.score.score);
+          metrics.incPitchCall(result.pitchCalls);
+          metrics.addAiUsage(result.usage);
 
           scored = {
             order,
@@ -199,7 +231,9 @@ async function run(): Promise<void> {
           });
           await enqueueNotifications(scored);
           totalEnqueued++;
+          metrics.incEnqueued();
         } catch (err) {
+          metrics.incError("enqueue");
           logger.error(
             { err, orderId: order.id },
             "Ошибка enqueue уведомлений (заказ не помечен processed — повторим в следующем прогоне)",
@@ -251,6 +285,8 @@ async function run(): Promise<void> {
       { totalNew, totalEnqueued, dbSize },
       "Цикл завершён",
     );
+
+    await metrics.flush();
 
     if (!process.env.KEEP_ALIVE) {
       setTimeout(async () => {

@@ -136,8 +136,18 @@ function PageComponent() {
     <div className="max-w-3xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-white mb-1">🔍 ScanAgent</h1>
-        <p className="text-gray-400 text-sm">Заказы с фриланс-бирж · обновляется каждые 30 мин</p>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white mb-1">🔍 ScanAgent</h1>
+            <p className="text-gray-400 text-sm">Заказы с фриланс-бирж · обновляется каждые 30 мин</p>
+          </div>
+          <a
+            href="/stats"
+            className="shrink-0 px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors"
+          >
+            📊 Статистика
+          </a>
+        </div>
         {(() => {
           const applied = orders?.filter(o => o.status === 'applied') ?? [];
           if (applied.length === 0) return null;
