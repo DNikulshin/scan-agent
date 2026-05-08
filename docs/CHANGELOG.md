@@ -4,6 +4,40 @@
 
 ---
 
+## 2026-05-08 — Безупречная доставка уведомлений: outbox + worker + SSE (Фазы 1–4)
+
+**Цель:** отвязать «решение отправить» от «факт доставки». Агент перестал отправлять напрямую — пишет `NotificationJob` в Postgres-outbox синхронно с `markProcessed`. Доставку делает 24/7 worker внутри dashboard-контейнера. План: `~/.claude/plans/sunny-drifting-token.md`.
+
+**Архитектура:** `agent → notification_jobs → dashboard worker → Telegram / web-push`. SSE-стрим `pg_notify('order_new')` → открытые вкладки получают новые карточки без F5.
+
+**Фаза 1 — outbox в БД и enqueue в агенте** (commit `d46ee9d`):
+- Модель `NotificationJob` в [prisma/schema.prisma](../prisma/schema.prisma); миграция `20260505225113_add_notification_jobs` с `pg_notify`-триггерами `order_new` и `notification_job_new`.
+- Pure-форматтеры [src/notifiers/telegram-format.ts](../src/notifiers/telegram-format.ts) (`buildOrderMessage`, `buildReminderMessage`) — переиспользуются и в агенте, и в worker'e.
+- Общий [src/core/prisma.ts](../src/core/prisma.ts), [src/core/notifications.ts](../src/core/notifications.ts) с `enqueueNotifications` (telegram + N push) и `enqueueReminder`.
+- [src/index.ts](../src/index.ts): inline `telegram.send`/`push.sendToAll` заменены на `markProcessed → enqueueNotifications`. Push-инстанс из агента удалён, reminder через outbox.
+
+**Фазы 2–3 — dashboard worker + SSE** (commit `4c3e6a3`):
+- [dashboard/lib/notifications/dispatcher.ts](../dashboard/lib/notifications/dispatcher.ts) — singleton через `globalThis`, poll `NOTIFICATIONS_POLL_INTERVAL_MS` (def 5000), batch до `NOTIFICATIONS_BATCH_LIMIT` (def 20). Атомарный `claimBatch` через `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)`, подбирает зависшие `sending` (>15 мин). Backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h, 24h]`; `RetryableError.retryAfterSec` имеет приоритет (Telegram 429); `FatalError` или `attempts ≥ maxAttempts` → `failed`. Per-job изоляция через `Promise.allSettled`.
+- Каналы: [telegram.ts](../dashboard/lib/notifications/channels/telegram.ts) — прямой `fetch` Bot API без `node-telegram-bot-api`; [push.ts](../dashboard/lib/notifications/channels/push.ts) — `web-push` с `TTL=2592000`, `Urgency: high`, `Topic: <orderId>`, авто-удаление подписок на 410/404/403.
+- [dashboard/instrumentation.ts](../dashboard/instrumentation.ts) — Next.js 16 `register()`, kill-switch `NOTIFICATIONS_DISPATCHER_DISABLED`.
+- Health: `GET /api/health/notifications` (Bearer `DASHBOARD_API_KEY`) — counts по статусу за 24ч + last 10 failed.
+- SSE [dashboard/app/api/orders/stream/route.ts](../dashboard/app/api/orders/stream/route.ts): `runtime='nodejs'`, прямой `pg.Client` на `DATABASE_URL_DIRECT` (Prisma не умеет LISTEN/NOTIFY — pgBouncer/Accelerate теряют подписку), heartbeat 25с, `X-Accel-Buffering: no`. [RealtimeOrdersListener.tsx](../dashboard/components/RealtimeOrdersListener.tsx) — auto-reconnect 1s→30s, reset на `event: ready`.
+
+**Фаза 4 — cleanup (этот коммит):**
+- Удалён `src/notifiers/push.ts` — логика отправки и delete-on-410 переехала в worker.
+- [dashboard/public/sw.js](../dashboard/public/sw.js): `tag: orderId, renotify: true` (повторный push по заказу схлопывается, но звук/вибро срабатывают); `notificationclick` фокусирует существующую вкладку dashboard вместо повторного открытия.
+- `web-push` в корневом `package.json` остаётся ради `scripts/test-push.ts` (sanity-check доставки на проде).
+
+**Принятые решения:**
+- БД очереди — Postgres (Redis/BullMQ overkill для 10–15 push/день; `pg_notify` + `SKIP LOCKED` дают всё нужное).
+- Push fan-out — одна job на endpoint (потеря одной не влияет на остальные).
+- Worker singleton через `instrumentation.ts` + `globalThis`. На двух репликах `SKIP LOCKED` всё равно атомарен.
+- Telegram polling (callback-кнопки `/setrate`, `pick1/pick2/skip`) **остаётся в агенте** — перенос polling'а в dashboard вне скоупа.
+
+**Новые env для dashboard** (см. `CLAUDE.md`): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `VAPID_SUBJECT`, `DATABASE_URL_DIRECT`, опц. `NOTIFICATIONS_POLL_INTERVAL_MS`, `NOTIFICATIONS_BATCH_LIMIT`, `NOTIFICATIONS_DISPATCHER_DISABLED`.
+
+---
+
 ## 2026-05-05 — Шаг 2 миграции на Prisma + универсальный dev-доступ через Caddy
 
 **Prisma миграция (Шаг 2 плана `docs/plans/postgres-migration.md`):**

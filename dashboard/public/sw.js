@@ -21,19 +21,38 @@ self.addEventListener('activate', event => {
 // ── Push notifications ───────────────────────────────────────────────────────
 self.addEventListener('push', event => {
   const data = event.data ? event.data.json() : {};
+  const orderId = data.data?.orderId;
   event.waitUntil(
     self.registration.showNotification(data.title || 'ScanAgent', {
       body: data.body || 'Новое уведомление',
-      icon: '/icons/icon-192.svg',
+      icon: data.icon || '/icons/icon-192.svg',
       badge: '/icons/icon-192.svg',
       vibrate: [100, 50, 100],
+      // tag = orderId: повторный push по тому же заказу схлопывается в одно
+      // уведомление (актуально на iOS/Android, где ретраи могут дублировать).
+      // renotify: true — звук/вибро срабатывают и при замене.
+      tag: orderId || 'scan-agent',
+      renotify: true,
+      data: data.data || {},
     })
   );
 });
 
 self.addEventListener('notificationclick', event => {
   event.notification.close();
-  event.waitUntil(clients.openWindow('/'));
+  const targetUrl = new URL('/', self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
+      // Если есть открытая вкладка dashboard — фокусируем её, без перезагрузки.
+      for (const win of windows) {
+        const winUrl = new URL(win.url);
+        if (winUrl.origin === self.location.origin) {
+          return win.focus();
+        }
+      }
+      return self.clients.openWindow(targetUrl);
+    })
+  );
 });
 
 // ── Fetch caching ────────────────────────────────────────────────────────────

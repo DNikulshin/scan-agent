@@ -9,44 +9,31 @@
 
 Подгружай по мере необходимости, не держи в контексте по умолчанию:
 - [docs/plans/postgres-migration.md](docs/plans/postgres-migration.md) — план миграции БД (Шаги 1–4 ✅, 5–9 ⏳).
-- `~/.claude/plans/sunny-drifting-token.md` — **активный план** надёжной доставки уведомлений (outbox + worker + SSE). Фазы 1–3 ✅, Фаза 4 (cleanup + sw.js) — следующая.
+- `~/.claude/plans/sunny-drifting-token.md` — план надёжной доставки уведомлений (outbox + worker + SSE). Все 4 фазы ✅, итог в [docs/CHANGELOG.md](docs/CHANGELOG.md) (2026-05-08).
 - [docs/CHANGELOG.md](docs/CHANGELOG.md) — лог изменений (только при поиске исторического контекста).
 - [docs/DEPLOY.md](docs/DEPLOY.md) — VPS-стек, CI/CD, инфра-нюансы (только при работе с деплоем).
 
 ---
 
-## 🚧 Текущая задача (in progress)
+## ✅ Завершено: безупречная доставка уведомлений (outbox + worker + SSE)
 
-**Безупречная доставка уведомлений: outbox в Postgres + worker в dashboard + SSE.**
+Все 4 фазы плана `~/.claude/plans/sunny-drifting-token.md` закрыты. Подробный лог — в [docs/CHANGELOG.md](docs/CHANGELOG.md) (запись 2026-05-08). Ниже — карта кода и принятых решений.
 
-План: `~/.claude/plans/sunny-drifting-token.md` — читать целиком перед продолжением. Архитектура: агент пишет `NotificationJob` записи в outbox синхронно с `markProcessed`; dashboard-контейнер 24/7 крутит dispatcher с `SELECT FOR UPDATE SKIP LOCKED`, retry-backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h]`, изоляция per-channel; для real-time в открытой вкладке — SSE через `pg_notify('order_new')`.
+**Архитектура.** Агент пишет `NotificationJob` записи в outbox синхронно с `markProcessed`; dashboard-контейнер 24/7 крутит dispatcher с `SELECT FOR UPDATE SKIP LOCKED`, retry-backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h]`, изоляция per-channel; для real-time в открытой вкладке — SSE через `pg_notify('order_new')`.
 
-**Прогресс по плану уведомлений:**
-- ✅ Фаза 1 — outbox + enqueue в агенте:
-  - Модель `NotificationJob` в [prisma/schema.prisma](prisma/schema.prisma); миграция `20260505225113_add_notification_jobs` с двумя `pg_notify`-триггерами (`order_new`, `notification_job_new`). Применена.
-  - [src/notifiers/telegram-format.ts](src/notifiers/telegram-format.ts) — pure-форматтеры (`buildOrderMessage`, `buildReminderMessage`). [src/notifiers/telegram.ts](src/notifiers/telegram.ts) — теперь тонкая обёртка.
-  - [src/core/prisma.ts](src/core/prisma.ts) — общий PrismaClient. [src/core/notifications.ts](src/core/notifications.ts) — `enqueueNotifications` (1 telegram + N push) и `enqueueReminder`.
-  - [src/index.ts](src/index.ts) — inline `telegram.send`/`push.sendToAll` заменены на `markProcessed → enqueueNotifications`. Push-инстанс из агента удалён. Reminder через outbox.
-  - [scripts/enqueue-smoke.ts](scripts/enqueue-smoke.ts) — sanity-check (прогон 2026-05-05: `delta=1`, ОК).
-- ✅ Фаза 2 — dashboard worker:
-  - [dashboard/lib/notifications/dispatcher.ts](dashboard/lib/notifications/dispatcher.ts) — singleton (через `globalThis`), poll каждые `NOTIFICATIONS_POLL_INTERVAL_MS` (def 5000), batch `NOTIFICATIONS_BATCH_LIMIT` (def 20). `claimBatch` — атомарный `UPDATE … FROM (SELECT … FOR UPDATE SKIP LOCKED)` с инкрементом `attempts`, lock'ом и подбором зависших `sending` (старше 15 мин). `processJob` через `Promise.allSettled` (per-job изоляция). Backoff `[30s, 1m, 5m, 15m, 1h, 6h, 24h, 24h]`; `RetryableError.retryAfterSec` имеет приоритет (для Telegram 429); `FatalError` или `attempts ≥ maxAttempts` → `failed`.
-  - [dashboard/lib/notifications/errors.ts](dashboard/lib/notifications/errors.ts) — `RetryableError` / `FatalError`.
-  - [dashboard/lib/notifications/channels/telegram.ts](dashboard/lib/notifications/channels/telegram.ts) — прямой `fetch` на Bot API (без `node-telegram-bot-api`). 429→Retryable(retry_after), 5xx/network→Retryable, 4xx→Fatal.
-  - [dashboard/lib/notifications/channels/push.ts](dashboard/lib/notifications/channels/push.ts) — `web-push` с `TTL=2592000`, `Urgency: high`, `Topic: <orderId без дефисов>`. 410/404/403 → `prisma.pushSubscription.deleteMany` + Fatal; 429/5xx/timeout → Retryable.
-  - [dashboard/instrumentation.ts](dashboard/instrumentation.ts) — Next.js 16 `register()`, отсекает edge через `NEXT_RUNTIME==='nodejs'`. Kill-switch: `NOTIFICATIONS_DISPATCHER_DISABLED=true`.
-  - [dashboard/app/api/health/notifications/route.ts](dashboard/app/api/health/notifications/route.ts) — `GET` (Bearer `DASHBOARD_API_KEY`): counts по статусу за 24ч + oldest pending + last 10 failed.
-  - [dashboard/package.json](dashboard/package.json) — добавлены `web-push` + `@types/web-push`.
-- ✅ Фаза 3 — SSE:
-  - [dashboard/package.json](dashboard/package.json) — добавлены `pg` + `@types/pg` (для LISTEN/NOTIFY — Prisma не умеет, idle-коннекты возвращаются в pgBouncer-пул и теряют подписку).
-  - [dashboard/app/api/orders/stream/route.ts](dashboard/app/api/orders/stream/route.ts) — SSE endpoint: `runtime='nodejs'`, прямой `pg.Client` на `DATABASE_URL_DIRECT` (fallback на `DATABASE_URL`), `LISTEN order_new`, `event: order_new`/`event: ready`, heartbeat-comment каждые 25с, cleanup на `req.signal.aborted` + `cancel()` стрима + `client.on('error')`. Заголовки: `text/event-stream`, `no-cache`, `X-Accel-Buffering: no` (отключает буферизацию nginx/Caddy).
-  - [dashboard/components/RealtimeOrdersListener.tsx](dashboard/components/RealtimeOrdersListener.tsx) — `EventSource` на `/api/orders/stream`, на `order_new` → `queryClient.invalidateQueries({queryKey:['orders']})`. Auto-reconnect с backoff 1s→30s; reset до 1s на `event: ready`.
-  - [dashboard/app/layout.tsx](dashboard/app/layout.tsx) — listener подключён внутри `ClientProviders` рядом с `PushNotificationManager` (нужен `QueryClientProvider` контекст; в `page.tsx` он недоступен напрямую).
-- Фаза 4 — cleanup: удалить `src/notifiers/push.ts`, обновить `sw.js` (`tag: orderId, renotify: true`, deep-link click), CHANGELOG, CLAUDE.md.
+**Карта кода:**
+- Outbox: модель `NotificationJob` в [prisma/schema.prisma](prisma/schema.prisma); миграция `20260505225113_add_notification_jobs` с `pg_notify`-триггерами `order_new` и `notification_job_new`.
+- Агент: [src/core/notifications.ts](src/core/notifications.ts) (`enqueueNotifications` 1 telegram + N push, `enqueueReminder`); pure-форматтеры в [src/notifiers/telegram-format.ts](src/notifiers/telegram-format.ts); общий [src/core/prisma.ts](src/core/prisma.ts). [src/index.ts](src/index.ts) больше не отправляет уведомления напрямую.
+- Worker: [dashboard/lib/notifications/dispatcher.ts](dashboard/lib/notifications/dispatcher.ts) — singleton через `globalThis`, poll `NOTIFICATIONS_POLL_INTERVAL_MS` (def 5000), batch `NOTIFICATIONS_BATCH_LIMIT` (def 20), атомарный `claimBatch` с подбором зависших `sending` >15мин, `Promise.allSettled` per-job. Каналы [telegram.ts](dashboard/lib/notifications/channels/telegram.ts) (прямой `fetch` Bot API; 429→Retryable(retry_after), 5xx→Retryable, 4xx→Fatal) и [push.ts](dashboard/lib/notifications/channels/push.ts) (`web-push` + TTL `2592000` + Urgency `high` + Topic per orderId; 410/404/403 → `pushSubscription.deleteMany` + Fatal). Ошибки: [errors.ts](dashboard/lib/notifications/errors.ts).
+- Старт worker'а: [dashboard/instrumentation.ts](dashboard/instrumentation.ts) (Next.js 16 `register()`, edge-guard `NEXT_RUNTIME==='nodejs'`, kill-switch `NOTIFICATIONS_DISPATCHER_DISABLED=true`).
+- Health: [dashboard/app/api/health/notifications/route.ts](dashboard/app/api/health/notifications/route.ts) — `GET` (Bearer `DASHBOARD_API_KEY`): counts по статусу за 24ч + oldest pending + last 10 failed.
+- SSE: [dashboard/app/api/orders/stream/route.ts](dashboard/app/api/orders/stream/route.ts) — `runtime='nodejs'`, прямой `pg.Client` на `DATABASE_URL_DIRECT` (fallback `DATABASE_URL`), `LISTEN order_new`, heartbeat 25с, `X-Accel-Buffering: no`. [dashboard/components/RealtimeOrdersListener.tsx](dashboard/components/RealtimeOrdersListener.tsx) — `EventSource`, на `order_new` → invalidate `['orders']`, auto-reconnect 1s→30s, reset на `event: ready`. Подключён в [dashboard/app/layout.tsx](dashboard/app/layout.tsx) внутри `ClientProviders` (нужен `QueryClientProvider`).
+- Service Worker: [dashboard/public/sw.js](dashboard/public/sw.js) — `tag: orderId, renotify: true` (повторный push по тому же заказу схлопывается, но звук/вибро срабатывают); `notificationclick` фокусирует существующую вкладку dashboard вместо повторного `openWindow`.
 
 **Параллельный трек — Postgres-миграция (план `docs/plans/postgres-migration.md`):**
 - ✅ Шаги 1–3 — Prisma Postgres + storage переписан, `better-sqlite3` удалён.
 - ✅ Шаг 4 — dashboard на Prisma: [dashboard/lib/db.ts](dashboard/lib/db.ts) (singleton + `serializeOrder` для snake_case API), все API routes (`orders`, `pitch`, `reset`, `push-subscriptions`), `actions.ts`. **`@prisma/client` намеренно НЕ в `dashboard/package.json`** — иначе ставится заглушка с `PrismaClient = any`; резолвится из корневого `node_modules` через Node module resolution. Это критично для type-check и Next.js standalone.
-- ⏳ Шаги 5–9 — отложены до Фазы 4 плана уведомлений (удалить `src/notifiers/dashboard.ts` уже не нужно после outbox).
+- ⏳ Шаги 5–9 — отложены, переосмыслены после внедрения outbox (удаление `src/notifiers/dashboard.ts` потеряло актуальность).
 
 **Принятые решения:**
 - БД очереди: Postgres (выбран вместо Redis/BullMQ — для 10–15 push/день overkill; `pg_notify` + `SKIP LOCKED` дают всё нужное без новой инфры).
@@ -56,8 +43,9 @@
 
 **Нюансы:**
 - `HTTP_PROXY` в dev ломает `prisma migrate`/`generate` — запускать с `env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy npx prisma ...`.
-- Telegram polling **остаётся в агенте** (callback-кнопки `/setrate`, `/setscore`, `pick1/pick2/skip`). Перенос polling'а в dashboard — отдельная задача, не в этом плане.
-- `migrations/001_add_hh_fields.sql` и `supabase/migration.sql` — снести после Фазы 4.
+- Telegram polling **остаётся в агенте** (callback-кнопки `/setrate`, `/setscore`, `pick1/pick2/skip`). Перенос polling'а в dashboard — отдельная задача.
+- `migrations/001_add_hh_fields.sql` и `supabase/migration.sql` — реликты pre-Prisma эпохи, можно удалить вместе со следующим cleanup'ом БД.
+- `web-push` остаётся в корневом `package.json` ради `scripts/test-push.ts` (sanity-check доставки на проде); `src/notifiers/push.ts` удалён в Фазе 4.
 
 ---
 
@@ -146,7 +134,7 @@ Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные и�
 #### Push Subscriptions
 - VAPID public key через `GET /api/vapid-public-key` (runtime), **не** `NEXT_PUBLIC_*` (build-time хрупко в standalone Docker)
 - `PushNotificationManager` авто-переподписывает при `granted` + нет подписки
-- `src/notifiers/push.ts` авто-удаляет подписки на 410/404/403
+- Подписки на 410/404/403 авто-удаляются worker'ом ([dashboard/lib/notifications/channels/push.ts](dashboard/lib/notifications/channels/push.ts))
 
 #### API Routes
 - `GET/POST/DELETE /api/push-subscriptions` (GET/DELETE — `DASHBOARD_API_KEY`)
@@ -165,7 +153,7 @@ Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные и�
 
 **Dashboard** (env в `docker-compose.yml`):
 - `DATABASE_URL`, `VAPID_PRIVATE_KEY`, `NEXT_PUBLIC_VAPID_PUBLIC_KEY`, `DASHBOARD_API_KEY`
-- **Новое для Фазы 2 worker'а** (нужно прокинуть перед деплоем): `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, опционально `VAPID_SUBJECT` (def `mailto:admin@example.com`), `NOTIFICATIONS_POLL_INTERVAL_MS`, `NOTIFICATIONS_BATCH_LIMIT`, kill-switch `NOTIFICATIONS_DISPATCHER_DISABLED`.
+- **Для notifications worker'а:** `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`; опционально `VAPID_SUBJECT` (def `mailto:admin@example.com`), `NOTIFICATIONS_POLL_INTERVAL_MS` (def 5000), `NOTIFICATIONS_BATCH_LIMIT` (def 20), kill-switch `NOTIFICATIONS_DISPATCHER_DISABLED=true`.
 - **Для SSE-роута** (`/api/orders/stream`): `DATABASE_URL_DIRECT` — non-pooled URL для прямого `pg.Client` (LISTEN/NOTIFY требует постоянной сессии, pgBouncer/Accelerate ломает подписку). Если не задан — fallback на `DATABASE_URL` (для локального dev на голом Postgres). Prisma Postgres даёт оба URL.
 
 ## Деплой и инфра
