@@ -60,7 +60,11 @@ jobs:
           HH_SEARCH_URL: ${{ secrets.HH_SEARCH_URL }}
           HH_MAX_PAGES: ${{ secrets.HH_MAX_PAGES }}
           HH_MIN_KEYWORD_SCORE: ${{ secrets.HH_MIN_KEYWORD_SCORE }}
-          # ── Dashboard / Supabase ──
+          # ── БД (Prisma Postgres, pooled URL — cron-агенту LISTEN не нужен) ──
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # ── Dashboard / Supabase / Push ──
+          # VAPID_* пока требуются validateConfig (push.ts удалён, но валидация
+          # ещё ссылается на ключи; будет вычищена отдельно).
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
