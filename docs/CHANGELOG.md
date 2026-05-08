@@ -4,6 +4,34 @@
 
 ---
 
+## 2026-05-08 (поздний вечер) — Блок 1: метрики прогона + `/stats` + MD-экспорт
+
+Реализован первый из 4 стратегических блоков (план `~/.claude/plans/humming-enchanting-castle.md`, реализационный план — `~/.claude/plans/crystalline-popping-scott.md`). Воронка `parsed → filtered → AI-scored → enqueued → applied → won/lost`, AI tokens/cost, score histogram и история прогонов теперь пишутся в `RunMetric` каждым запуском агента и доступны на `/stats` + как скачиваемый MD-отчёт.
+
+**Backend (commit `c3f8845`):**
+- [src/types.ts](../src/types.ts) — добавлен `AiUsage`.
+- [src/core/analyzer.ts](../src/core/analyzer.ts) — `callOpenRouter` возвращает `{text, usage}`. Cost подтягивается best-effort через `GET /api/v1/generation?id={id}` (`withRetry({maxAttempts: 2})`; 404/timeout → 0). `scoreOrder/generatePitch` → `{result, usage}`. `analyzeOrder` суммирует usage всех вызовов и возвращает количество pitch-вызовов.
+- [src/core/metrics.ts](../src/core/metrics.ts) (новый) — класс `RunMetrics` (accumulator: `incParsed/incFiltered/incLowScoreKeyword/incLowScoreAi/incScoringCall/incPitchCall/addAiUsage/recordScore/incEnqueued/incError/setParserDuration` + `flush()`). `runId` через `crypto.randomUUID`. `sent` в Outbox-эпохе = `enqueued`.
+- [src/index.ts](../src/index.ts) — pipeline инструментирован; `metrics.flush()` в `finally` перед `process.exit`.
+- [scripts/metrics-smoke.ts](../scripts/metrics-smoke.ts) — sanity-check (прогон ОК, `delta=1`).
+
+**Dashboard (тот же commit):**
+- [dashboard/lib/stats.ts](../dashboard/lib/stats.ts) (новый) — единая `getStats()` для page и MD: KPI + воронка + scoreHistogram + bySource + recentRuns.
+- [dashboard/app/stats/page.tsx](../dashboard/app/stats/page.tsx) + [dashboard/app/stats/StatsCharts.tsx](../dashboard/app/stats/StatsCharts.tsx) (новые) — Server Component с KPI-карточками, таблицей воронки, графиками (recharts) и таблицей последних 30 прогонов.
+- [dashboard/app/api/metrics/export/route.ts](../dashboard/app/api/metrics/export/route.ts) (новый) — `GET` отдаёт `text/markdown` с `Content-Disposition: attachment`.
+- [dashboard/app/page.tsx](../dashboard/app/page.tsx) — линк «📊 Статистика» в шапке.
+- `recharts^3.8.1` в зависимостях dashboard.
+
+**Mobile fix (commit `7aed66c`):**
+- Шапка `/stats` на узких экранах: `flex-col sm:flex-row` для контейнера и группы кнопок, кнопки `text-center` (растягиваются на всю ширину на мобильном). Решает баг — обрезался заголовок «📊 Статистика», т.к. кнопки «Скачать MD» + «К заказам» не влезали в один ряд.
+- Воронка: `overflow-x-auto + min-w-[360px]` для длинных меток («Отсеяно по keyword (HH)»).
+- [scripts/mobile-shot.mjs](../scripts/mobile-shot.mjs) (новый) — playwright-снимок iPhone-вьюпорта; запускается из code-server'a через docker network к `http://dashboard:3000` (минуя Caddy/Authelia).
+
+**Известный артефакт первого деплоя (исправлен):**
+В первой проверке воронка показывала проценты > 100% (`applied=32`, но `parsed=8` из smoke-теста). Причина: legacy-orders из миграции postgres-scan → Prisma Postgres имели `status='applied'` исторически, а `RunMetric` была заполнена только smoke'ом. Решение: `DELETE FROM run_metrics WHERE run_id = '...';` smoke-записи. После первого реального cron-прогона `ScanAgent` цифры выровнялись.
+
+---
+
 ## 2026-05-08 (вечер) — Production rollout outbox + миграция dashboard на Prisma Postgres
 
 End-to-end проверено в проде: GHA cron-агент → orders в Prisma Postgres → enqueue → dashboard worker → telegram + 5 push'ей. Health: `done=30, pending=0, failed=0`. SSE: `event: ready`.
