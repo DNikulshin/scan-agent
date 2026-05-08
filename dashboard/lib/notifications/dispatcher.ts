@@ -111,14 +111,17 @@ async function claimBatch(
 ): Promise<ClaimedJob[]> {
   // Один запрос: атомарно берём batch (pending или зависшие sending),
   // помечаем 'sending', инкрементируем attempts.
+  // Префикс public. обязателен: pooled URL Prisma Postgres даёт
+  // current_schema=null, без префикса raw SQL не находит таблицу
+  // (ORM-запросы PrismaClient сами шлют "public"."notification_jobs").
   const rows = await prisma.$queryRaw<ClaimedJob[]>`
-    UPDATE notification_jobs
+    UPDATE public.notification_jobs
        SET status = 'sending',
            locked_at = now(),
            locked_by = ${workerId},
            attempts = attempts + 1
      WHERE id IN (
-       SELECT id FROM notification_jobs
+       SELECT id FROM public.notification_jobs
         WHERE (status = 'pending' AND next_attempt_at <= now())
            OR (status = 'sending' AND locked_at < now() - (${STUCK_AFTER_MS} || ' milliseconds')::interval)
         ORDER BY next_attempt_at
