@@ -4,6 +4,37 @@
 
 ---
 
+## 2026-05-08 (вечер) — Production rollout outbox + миграция dashboard на Prisma Postgres
+
+End-to-end проверено в проде: GHA cron-агент → orders в Prisma Postgres → enqueue → dashboard worker → telegram + 5 push'ей. Health: `done=30, pending=0, failed=0`. SSE: `event: ready`.
+
+**Что приехало в прод этим разворотом** (в одной сессии, по шагам):
+
+1. **GHA secret `DATABASE_URL`** добавлен (commit `2b0cd66`). До этого workflow `ScanAgent` падал бы на старте Prisma — секрета не было после миграции с SQLite.
+2. **Docker build dashboard починен** для монорепо (commit `a6c30f0`):
+   - `Deploy Dashboard` падал на `npm ci`, потому что build context был `./dashboard`, а `dashboard/postinstall = prisma generate --schema ../prisma/schema.prisma` смотрит за пределы context'а; плюс `@prisma/client` намеренно НЕ в `dashboard/package.json` (резолвится из корневого `node_modules`), в Docker корневых deps тоже не было.
+   - Workflow: `context: .` + `file: ./dashboard/Dockerfile`.
+   - [dashboard/Dockerfile](../dashboard/Dockerfile) многоступенчатый: deps-стадия ставит и корневые deps (с `npx prisma generate`), и dashboard-deps; builder копирует обе папки `node_modules`; runner запускает `node dashboard/server.js`.
+   - [dashboard/next.config.ts](../dashboard/next.config.ts): добавлен `outputFileTracingRoot: '..'` — без него standalone не подхватывает `@prisma/client` из корневого `node_modules`.
+   - Корневой [.dockerignore](../.dockerignore) отсекает `.git/.next/node_modules/docs`.
+3. **Миграция БД dashboard** с локального `postgres-scan` на Prisma Postgres:
+   - `UPDATE orders SET col = COALESCE(col, '')` в legacy БД (Prisma DDL даёт NOT NULL DEFAULT '', legacy DDL допускал NULL).
+   - `pg_dump --data-only --column-inserts -t orders -t push_subscriptions` → импорт в Prisma Postgres через `psql` (после `TRUNCATE` smoke-test записей). 190 orders + 5 push_subs перенесены.
+   - Блок `dashboard.environment` в `/opt/home-codespaces/docker-compose.yml` переписан на `${DATABASE_URL}/${DATABASE_URL_DIRECT}/${TELEGRAM_BOT_TOKEN}/${TELEGRAM_CHAT_ID}`; `depends_on: postgres-scan` удалён. Соответствующие env'ы добавлены в `/opt/home-codespaces/.env`.
+   - Контейнер `postgres-scan` оставлен как страховка/legacy backup; снести через ~неделю если всё стабильно.
+4. **`public.` префикс в `$queryRaw`** (commit `73ed733`):
+   - Pooled URL Prisma Postgres отдаёт `current_schema = null`, raw SQL без префикса падает с `42P01 relation "notification_jobs" does not exist`.
+   - ORM-запросы шлют `"public"."notification_jobs"` сами и работают, raw — нет.
+   - Альтернатива через `&schema=public` в URL не сработала: Prisma 6.19 на ней отвечает `Can't reach database server`.
+   - Fix в [dashboard/lib/notifications/dispatcher.ts:114-129](../dashboard/lib/notifications/dispatcher.ts#L114-L129) — `FROM public.notification_jobs`.
+
+**Что осталось как «не блокеры»:**
+- `RunMetric` метрики не пишутся в [src/index.ts](../src/index.ts) — отдельная задача (Блок 1, план `~/.claude/plans/humming-enchanting-castle.md`).
+- `src/notifiers/dashboard.ts`, `src/notifiers/supabase.ts` — опциональные дублирующие каналы, можно удалить отдельным cleanup'ом.
+- `migrations/001_add_hh_fields.sql`, `supabase/migration.sql` — реликты pre-Prisma эпохи.
+
+---
+
 ## 2026-05-08 — Безупречная доставка уведомлений: outbox + worker + SSE (Фазы 1–4)
 
 **Цель:** отвязать «решение отправить» от «факт доставки». Агент перестал отправлять напрямую — пишет `NotificationJob` в Postgres-outbox синхронно с `markProcessed`. Доставку делает 24/7 worker внутри dashboard-контейнера. План: `~/.claude/plans/sunny-drifting-token.md`.
