@@ -31,7 +31,10 @@ jobs:
       - name: Build and push image to GHCR
         uses: docker/build-push-action@v6
         with:
-          context: ./dashboard
+          # Context = repo root: Dockerfile нуждается в корневом package.json
+          # (для @prisma/client) + prisma/schema.prisma (для postinstall в dashboard).
+          context: .
+          file: ./dashboard/Dockerfile
           push: true
           tags: ghcr.io/dnikulshin/scan-agent/dashboard:latest
           cache-from: type=gha          # кеш слоёв между запусками — бесплатно

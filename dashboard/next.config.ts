@@ -13,6 +13,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(process.cwd(), '..'),
   },
+  // Тот же корень для file tracing — иначе standalone-бандл не подхватит
+  // @prisma/client из корневого node_modules при сборке Docker-образа.
+  outputFileTracingRoot: path.resolve(process.cwd(), '..'),
   async headers() {
     return [
       {
