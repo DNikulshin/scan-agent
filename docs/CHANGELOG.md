@@ -4,6 +4,19 @@
 
 ---
 
+## 2026-05-09 — FL.ru: фильтр платных откликов
+
+На FL.ru проекты с платным откликом приходили в общую выдачу — тратили AI-токены, попадали в Telegram, отвлекали. Добавлен авто-клик чекбокса «Не требуется оплата отклика» перед парсингом.
+
+- [src/parsers/fl.ts](../src/parsers/fl.ts) — helper `applyFreeResponsesFilter(page)` находит `label[for="ui-checkbox-check-for-all"]`, кликает, ждёт перерисовку, возвращает `page.url()` после применения. URL используется как база для пагинации (FL.ru добавляет query-param при фильтрации).
+- `buildPageUrl` переписан через `URL` API — корректно вставляет `/page-N/` в pathname, не ломая query-string.
+- [src/config.ts](../src/config.ts) — новый флаг `fl.onlyFreeResponses` (env `FL_ONLY_FREE_RESPONSES`, дефолт `true`). Прочитан как `!== "false"` чтобы по умолчанию был включён.
+- `.env` + [.github/workflows/scan-agent.yml](../.github/workflows/scan-agent.yml) — `FL_ONLY_FREE_RESPONSES=true` явно прописан.
+
+Если чекбокс не найден — лог-ворнинг, парсер продолжает работу без фильтра (graceful degradation). Если FL.ru поменяет вёрстку — увидим в логах.
+
+---
+
 ## 2026-05-08 (поздний вечер) — Блок 1: метрики прогона + `/stats` + MD-экспорт
 
 Реализован первый из 4 стратегических блоков (план `~/.claude/plans/humming-enchanting-castle.md`, реализационный план — `~/.claude/plans/crystalline-popping-scott.md`). Воронка `parsed → filtered → AI-scored → enqueued → applied → won/lost`, AI tokens/cost, score histogram и история прогонов теперь пишутся в `RunMetric` каждым запуском агента и доступны на `/stats` + как скачиваемый MD-отчёт.

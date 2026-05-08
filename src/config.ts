@@ -81,6 +81,13 @@ export const config = {
     enabled: process.env.FL_ENABLED === "true",
     /** Генерировать AI-питч? false = только скоринг, отклик пишем вручную */
     generatePitch: process.env.FL_GENERATE_PITCH === "true",
+    /**
+     * Брать только проекты с бесплатным откликом.
+     * По умолчанию true — кликаем фильтр «Не требуется оплата отклика»
+     * перед парсингом, чтобы не тратить кворки/деньги на платные отклики.
+     * Поставь `FL_ONLY_FREE_RESPONSES=false` если нужны все проекты.
+     */
+    onlyFreeResponses: process.env.FL_ONLY_FREE_RESPONSES !== "false",
     url: process.env.FL_SEARCH_URL ?? "https://www.fl.ru/projects/",
     /** Сколько страниц парсить (GitHub Actions: не больше 5 чтобы не тратить минуты) */
     maxPages: Number(process.env.FL_MAX_PAGES ?? "5"),

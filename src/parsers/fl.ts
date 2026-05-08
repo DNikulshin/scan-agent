@@ -1,3 +1,4 @@
+import type { Page } from "playwright";
 import { config } from "../config";
 import { createBrowser, debugScreenshot } from "./browser";
 import type { Order, Parser } from "../types";
@@ -30,15 +31,19 @@ function randomUA(): string {
   return uas[Math.floor(Math.random() * uas.length)];
 }
 
-/** Нормализует базовый URL — убирает /page-N/ если есть */
-function normalizeBaseUrl(url: string): string {
-  return url.replace(/(\/page-\d+\/?)$/, "").replace(/\/$/, "");
-}
-
-/** Строит URL нужной страницы */
+/**
+ * Строит URL нужной страницы, сохраняя query-string базового URL.
+ * Например: `https://www.fl.ru/projects/?kind=1` + page=2 →
+ *           `https://www.fl.ru/projects/page-2/?kind=1`
+ */
 function buildPageUrl(baseUrl: string, page: number): string {
-  const base = normalizeBaseUrl(baseUrl);
-  return page === 1 ? `${base}/` : `${base}/page-${page}/`;
+  const u = new URL(baseUrl);
+  // Удаляем существующий /page-N/ из pathname
+  u.pathname = u.pathname.replace(/\/page-\d+\/?$/, "");
+  // Гарантируем trailing slash
+  if (!u.pathname.endsWith("/")) u.pathname += "/";
+  if (page > 1) u.pathname += `page-${page}/`;
+  return u.toString();
 }
 
 /**
@@ -106,6 +111,53 @@ function checkHardExclude(text: string): string | null {
     if (regex.test(textLower)) return word;
   }
   return null;
+}
+
+/**
+ * Кликает фильтр «Не требуется оплата отклика» на FL.ru.
+ * Возвращает URL после применения фильтра (для использования как база пагинации).
+ * Если чекбокс не найден / клик не сработал — возвращает null, парсер продолжит без фильтра.
+ */
+async function applyFreeResponsesFilter(page: Page): Promise<string | null> {
+  try {
+    const label = page
+      .locator('label[for="ui-checkbox-check-for-all"]')
+      .first();
+    if ((await label.count()) === 0) {
+      console.warn(
+        `⚠️  ${FL_PREFIX} Чекбокс "Не требуется оплата отклика" не найден — вёрстка изменилась?`,
+      );
+      return null;
+    }
+
+    const urlBefore = page.url();
+    await label.scrollIntoViewIfNeeded().catch(() => {});
+    await label.click({ timeout: 5_000 });
+
+    // Фильтр может либо перезагрузить страницу (URL меняется), либо обновить через AJAX
+    await page
+      .waitForLoadState("domcontentloaded", { timeout: 10_000 })
+      .catch(() => {});
+    await page.waitForTimeout(2_000);
+
+    const urlAfter = page.url();
+    if (urlAfter !== urlBefore) {
+      console.log(
+        `✅ ${FL_PREFIX} Фильтр "бесплатные отклики" → ${urlAfter}`,
+      );
+    } else {
+      console.log(
+        `✅ ${FL_PREFIX} Фильтр "бесплатные отклики" применён (без смены URL)`,
+      );
+    }
+    return urlAfter;
+  } catch (err) {
+    console.warn(
+      `⚠️  ${FL_PREFIX} Не удалось применить фильтр "бесплатные отклики":`,
+      (err as Error).message,
+    );
+    return null;
+  }
 }
 
 /** Тип сырой карточки — используется внутри page.evaluate */
@@ -241,6 +293,13 @@ export class FlParser implements Parser {
       await page.click('[class*="close"], [data-qa="close"]').catch(() => {});
       await page.waitForTimeout(1_500);
 
+      // Применяем фильтр «Не требуется оплата отклика» (если включено)
+      let paginationBaseUrl = baseUrl;
+      if (config.fl.onlyFreeResponses) {
+        const filteredUrl = await applyFreeResponsesFilter(page);
+        if (filteredUrl) paginationBaseUrl = filteredUrl;
+      }
+
       // Проверяем наличие карточек
       const hasCards = await page.evaluate(() => {
         const sels = ['[data-qa="project-item"]', ".b-post"];
@@ -267,7 +326,7 @@ export class FlParser implements Parser {
         const delay = randomDelay();
         await page.waitForTimeout(delay);
 
-        const pageUrl = buildPageUrl(baseUrl, pageNum);
+        const pageUrl = buildPageUrl(paginationBaseUrl, pageNum);
 
         const result = await page.evaluate(async (url: string) => {
           try {

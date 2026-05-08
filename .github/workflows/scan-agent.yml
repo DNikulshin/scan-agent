@@ -49,6 +49,7 @@ jobs:
           FL_SEARCH_URL: ${{ secrets.FL_SEARCH_URL }}
           FL_GENERATE_PITCH: "false"   # отклики пишем вручную
           FL_MAX_PAGES: "5"            # ограничение минут Actions
+          FL_ONLY_FREE_RESPONSES: ${{ secrets.FL_ONLY_FREE_RESPONSES }}
           # ── Freelance.ru ──
           FREELANCERU_ENABLED: ${{ secrets.FREELANCERU_ENABLED }}
           FREELANCERU_SEARCH_URL: ${{ secrets.FREELANCERU_SEARCH_URL }}
