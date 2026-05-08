@@ -30,25 +30,25 @@ export default async function StatsPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      {/* Header */}
-      <div className="mb-8 flex items-start justify-between gap-4">
+      {/* Header — на мобильных кнопки уходят под заголовок вертикально */}
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">📊 Статистика</h1>
           <p className="text-gray-400 text-sm">
             All-time. Обновляется после каждого прогона агента.
           </p>
         </div>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex flex-col sm:flex-row gap-2 sm:shrink-0">
           <a
             href="/api/metrics/export"
             download
-            className="px-3 py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+            className="px-3 py-1.5 text-sm rounded-md bg-blue-600 hover:bg-blue-500 text-white transition-colors text-center"
           >
             📥 Скачать MD
           </a>
           <Link
             href="/"
-            className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors"
+            className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors text-center"
           >
             ← К заказам
           </Link>
@@ -79,8 +79,8 @@ export default async function StatsPage() {
       {/* Воронка */}
       <section className="mb-8">
         <h2 className="text-lg font-semibold text-white mb-3">Воронка</h2>
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-          <table className="w-full text-sm">
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 overflow-x-auto">
+          <table className="w-full text-sm min-w-[360px]">
             <thead className="text-gray-400 text-left">
               <tr>
                 <th className="pb-2">Этап</th>
