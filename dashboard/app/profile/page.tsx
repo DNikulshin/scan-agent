@@ -230,6 +230,8 @@ function FlSection({ fetchedAt, payload }: { fetchedAt: string; payload: FlProfi
 
 function KworkSection({ fetchedAt, payload }: { fetchedAt: string; payload: KworkProfilePayload }): React.ReactElement {
   const title = payload.displayName ? `Kwork — ${payload.displayName}` : 'Kwork';
+  const skills = payload.skills ?? [];
+  const badges = payload.badges ?? [];
   const descriptionExcerpt = payload.description
     ? payload.description.length > 300
       ? `${payload.description.slice(0, 300)}…`
@@ -250,9 +252,9 @@ function KworkSection({ fetchedAt, payload }: { fetchedAt: string; payload: Kwor
           </div>
         )}
         {payload.lastOnline && <div className="text-gray-500 text-xs">{payload.lastOnline}</div>}
-        {payload.badges.length > 0 && (
+        {badges.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {payload.badges.map((b, i) => (
+            {badges.map((b, i) => (
               <span key={`${b}-${i}`} className="px-2 py-0.5 text-xs bg-gray-800 text-gray-300 rounded">
                 {b}
               </span>
@@ -260,9 +262,9 @@ function KworkSection({ fetchedAt, payload }: { fetchedAt: string; payload: Kwor
           </div>
         )}
         {descriptionExcerpt && <p className="text-gray-300 whitespace-pre-line">{descriptionExcerpt}</p>}
-        {payload.skills.length > 0 && (
+        {skills.length > 0 && (
           <div className="flex flex-wrap gap-1">
-            {payload.skills.map((s, i) => (
+            {skills.map((s, i) => (
               <span key={`${s}-${i}`} className="px-2 py-0.5 text-xs bg-blue-900/40 text-blue-200 rounded">
                 {s}
               </span>

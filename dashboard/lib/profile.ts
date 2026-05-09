@@ -197,6 +197,8 @@ function renderFlSection(snap: SourceSnapshot<FlProfilePayload>): string[] {
 
 function renderKworkSection(snap: SourceSnapshot<KworkProfilePayload>): string[] {
   const p = snap.payload;
+  const skills = p.skills ?? [];
+  const badges = p.badges ?? [];
   const lines: string[] = [];
   const heading = p.displayName ? `## Kwork — ${p.displayName}` : '## Kwork';
   lines.push(heading);
@@ -208,7 +210,7 @@ function renderKworkSection(snap: SourceSnapshot<KworkProfilePayload>): string[]
     lines.push(`**Рейтинг:** ${p.rating} · **Отзывов:** ${p.reviewsCount}`);
   }
   if (p.lastOnline) lines.push(`_${p.lastOnline}_`);
-  if (p.badges.length > 0) lines.push(`**Бейджи:** ${p.badges.join(', ')}`);
+  if (badges.length > 0) lines.push(`**Бейджи:** ${badges.join(', ')}`);
   lines.push('');
   if (p.description) {
     const excerpt = p.description.length > 300 ? `${p.description.slice(0, 300)}…` : p.description;
@@ -217,10 +219,10 @@ function renderKworkSection(snap: SourceSnapshot<KworkProfilePayload>): string[]
     lines.push(excerpt);
     lines.push('');
   }
-  if (p.skills.length > 0) {
+  if (skills.length > 0) {
     lines.push('### Навыки');
     lines.push('');
-    lines.push(p.skills.join(', '));
+    lines.push(skills.join(', '));
     lines.push('');
   }
   return lines;
