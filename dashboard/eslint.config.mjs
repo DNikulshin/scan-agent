@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Stale next-pwa generated bundles (git-ignored, см. dashboard/.gitignore).
+    "public/swe-worker-*.js",
+    "public/workbox-*.js",
   ]),
 ]);
 

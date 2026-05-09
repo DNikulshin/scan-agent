@@ -28,11 +28,10 @@ export function OrderCard({ order, onStatusUpdate, onOutcomeUpdate }: {
   onStatusUpdate?: (id: string, status: 'applied' | 'skipped' | 'new') => void;
   onOutcomeUpdate?: (id: string, outcome: 'won' | 'lost' | 'pending') => void;
 }) {
-  try {
-    const [open, setOpen] = useState(false);
-    const [pending, setPending] = useState(false);
-    const score = typeof order.score === 'number' ? order.score : 0;
-    const stars = '⭐'.repeat(Math.min(Math.round(score / 2), 5));
+  const [open, setOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const score = typeof order.score === 'number' ? order.score : 0;
+  const stars = '⭐'.repeat(Math.min(Math.round(score / 2), 5));
 
   async function handleStatus(status: 'applied' | 'skipped' | 'new') {
     setPending(true);
@@ -198,12 +197,4 @@ export function OrderCard({ order, onStatusUpdate, onOutcomeUpdate }: {
       )}
     </div>
   );
-  } catch (err) {
-    console.error('Error rendering OrderCard:', err, order);
-    return (
-      <div className="rounded-xl border p-5 border-gray-800 bg-gray-900 text-red-400">
-        Ошибка отображения заказа
-      </div>
-    );
-  }
 }
