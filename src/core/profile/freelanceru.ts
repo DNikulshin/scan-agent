@@ -33,14 +33,13 @@ export async function fetchFreelanceruProfile(url: string): Promise<FreelanceruP
       };
 
       const ratingRaw = tryText([
-        '.profile-rating',
-        '[class*="rating"][class*="value"]',
-        '[class*="rating"]',
+        'div.rating-box div.rating.positive span',
+        'div.rating-box span',
       ]);
 
       const services: { title: string; description: string }[] = [];
       const items = document.querySelectorAll<HTMLElement>(
-        '.profile-services .service-item, .services-list .service, [class*="service"][class*="item"]',
+        '.profile-services .service-item, .services-list .service',
       );
       items.forEach((item) => {
         const title =

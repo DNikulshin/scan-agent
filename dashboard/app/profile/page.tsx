@@ -229,27 +229,45 @@ function FlSection({ fetchedAt, payload }: { fetchedAt: string; payload: FlProfi
 }
 
 function KworkSection({ fetchedAt, payload }: { fetchedAt: string; payload: KworkProfilePayload }): React.ReactElement {
+  const title = payload.displayName ? `Kwork — ${payload.displayName}` : 'Kwork';
+  const descriptionExcerpt = payload.description
+    ? payload.description.length > 300
+      ? `${payload.description.slice(0, 300)}…`
+      : payload.description
+    : null;
   return (
     <section className="mb-8">
-      <SourceHeader title="Kwork — услуги" fetchedAt={fetchedAt} link={payload.url} />
+      <SourceHeader title={title} fetchedAt={fetchedAt} link={payload.url} />
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 text-sm">
+        {payload.profession && (
+          <div className="text-gray-300">
+            <span className="text-white">{payload.profession}</span>
+          </div>
+        )}
         {(payload.rating > 0 || payload.reviewsCount > 0) && (
           <div className="text-gray-300">
             <span className="text-white">Рейтинг {payload.rating}</span> · {payload.reviewsCount} отзыв(ов)
           </div>
         )}
-        {payload.gigs.length > 0 && (
-          <ul className="space-y-2">
-            {payload.gigs.map((g, i) => (
-              <li key={`${g.title}-${i}`}>
-                <a href={g.link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
-                  {g.title}
-                </a>
-                <span className="text-gray-400"> — {g.price}</span>
-                {g.reviewsCount > 0 && <span className="text-gray-500 text-xs"> · {g.reviewsCount} отзыв(ов)</span>}
-              </li>
+        {payload.lastOnline && <div className="text-gray-500 text-xs">{payload.lastOnline}</div>}
+        {payload.badges.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {payload.badges.map((b, i) => (
+              <span key={`${b}-${i}`} className="px-2 py-0.5 text-xs bg-gray-800 text-gray-300 rounded">
+                {b}
+              </span>
             ))}
-          </ul>
+          </div>
+        )}
+        {descriptionExcerpt && <p className="text-gray-300 whitespace-pre-line">{descriptionExcerpt}</p>}
+        {payload.skills.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {payload.skills.map((s, i) => (
+              <span key={`${s}-${i}`} className="px-2 py-0.5 text-xs bg-blue-900/40 text-blue-200 rounded">
+                {s}
+              </span>
+            ))}
+          </div>
         )}
       </div>
     </section>

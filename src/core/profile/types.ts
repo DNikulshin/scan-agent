@@ -46,21 +46,22 @@ export interface FlProfilePayload {
   portfolio: FlPortfolioItem[];
 }
 
-export interface KworkGigItem {
-  title: string;
-  /** Цена «от XXX ₽». */
-  price: string;
-  /** Кол-во отзывов на этот gig. */
-  reviewsCount: number;
-  link: string;
-}
-
 export interface KworkProfilePayload {
   url: string;
   rating: number;
   reviewsCount: number;
-  /** Список услуг продавца. */
-  gigs: KworkGigItem[];
+  /** `userProfileName` из window.stateData. */
+  displayName?: string;
+  /** `userProfileProfession` — короткая строка-профессия. */
+  profession?: string;
+  /** `userProfileDescription`, очищенный от HTML, обрезанный до 1000 символов. */
+  description?: string;
+  /** Имена навыков из `userSkills[].name`. */
+  skills: string[];
+  /** Бейджи продавца (имена/тайтлы из `userProfileBadges`). */
+  badges: string[];
+  /** «Был онлайн …» как написано на странице (`lastOnlineAsString`). */
+  lastOnline?: string;
 }
 
 export interface FreelanceruServiceItem {

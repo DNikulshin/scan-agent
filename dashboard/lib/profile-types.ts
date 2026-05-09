@@ -29,17 +29,16 @@ export interface FlProfilePayload {
   portfolio: FlPortfolioItem[];
 }
 
-export interface KworkGigItem {
-  title: string;
-  price: string;
-  reviewsCount: number;
-  link: string;
-}
 export interface KworkProfilePayload {
   url: string;
   rating: number;
   reviewsCount: number;
-  gigs: KworkGigItem[];
+  displayName?: string;
+  profession?: string;
+  description?: string;
+  skills: string[];
+  badges: string[];
+  lastOnline?: string;
 }
 
 export interface FreelanceruServiceItem {

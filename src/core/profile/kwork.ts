@@ -1,13 +1,32 @@
 import { logger } from '../../utils/logger';
 import { withStealthPage } from './browser';
-import type { KworkProfilePayload, KworkGigItem } from './types';
+import type { KworkProfilePayload } from './types';
 
-const GIGS_LIMIT = 10;
+const DESCRIPTION_LIMIT = 1000;
+const SKILLS_LIMIT = 30;
+const BADGES_LIMIT = 10;
 
-/**
- * Парсит публичный профиль продавца Kwork.ru (страница `/user/<login>`).
- * Возвращает рейтинг, кол-во отзывов и список услуг (gigs).
- */
+interface KworkStateData {
+  userRating?: string | number | null;
+  totalReviewsCount?: number | null;
+  userProfileName?: string | null;
+  userProfileProfession?: string | null;
+  userProfileDescription?: string | null;
+  userSkills?: Array<{ id?: number; name?: string }> | null;
+  userProfileBadges?: Array<unknown> | null;
+  lastOnlineAsString?: string | null;
+}
+
+interface KworkRawSnapshot {
+  url: string;
+  stateData: KworkStateData | null;
+  fallback: {
+    displayName: string;
+    profession: string;
+    skills: string[];
+  };
+}
+
 export async function fetchKworkProfile(url: string): Promise<KworkProfilePayload> {
   return withStealthPage('kwork', async (page) => {
     logger.info({ url }, '[profile/kwork] открываю профиль');
@@ -16,71 +35,148 @@ export async function fetchKworkProfile(url: string): Promise<KworkProfilePayloa
     if (!resp || !resp.ok()) {
       throw new Error(`Kwork profile недоступен: status=${resp?.status() ?? 'no-response'}`);
     }
-    await page.waitForTimeout(1_500);
+    await page.waitForTimeout(1_000);
 
-    const payload = await page.evaluate((sourceUrl: string) => {
-      const num = (s: string): number => {
-        const m = s.match(/[-+]?\d+(?:[.,]\d+)?/);
-        return m ? Number(m[0].replace(',', '.')) : 0;
-      };
+    const raw = await page.evaluate((sourceUrl: string): KworkRawSnapshot => {
+      const w = window as unknown as { stateData?: KworkStateData };
+      const stateData = w.stateData ?? null;
+
       const text = (sel: string): string =>
         document.querySelector<HTMLElement>(sel)?.textContent?.trim() ?? '';
-      const tryText = (selectors: string[]): string => {
-        for (const s of selectors) {
-          const v = text(s);
-          if (v) return v;
-        }
-        return '';
-      };
-
-      const ratingRaw = tryText([
-        '.user-header__rating',
-        '[class*="rating"][class*="value"]',
-        '[class*="rating"]',
-      ]);
-      const reviewsRaw = tryText([
-        '.user-header__feedback-count',
-        '[class*="feedback"][class*="count"]',
-        '[class*="reviews"]',
-      ]);
-
-      const gigs: { title: string; price: string; reviewsCount: number; link: string }[] = [];
-      const cards = document.querySelectorAll<HTMLElement>(
-        '.want-card, .kwork-item, [class*="kwork"][class*="card"], [data-qa*="kwork-card"]',
-      );
-      cards.forEach((card) => {
-        const linkEl = card.querySelector<HTMLAnchorElement>('a[href]');
-        const link = linkEl?.href ?? '';
-        const title =
-          card.querySelector<HTMLElement>('.kwork-item__title, [class*="title"]')?.textContent?.trim() ??
-          linkEl?.textContent?.trim() ??
-          '';
-        const price =
-          card.querySelector<HTMLElement>('.kwork-item__price, [class*="price"]')?.textContent?.trim()?.replace(/\s+/g, ' ') ?? '';
-        const reviewsRaw =
-          card.querySelector<HTMLElement>('.kwork-item__reviews, [class*="reviews"]')?.textContent?.trim() ?? '';
-        if (title && link) {
-          gigs.push({ title, price, reviewsCount: num(reviewsRaw), link });
-        }
-      });
+      const skillsFromDom: string[] = [];
+      document
+        .querySelectorAll<HTMLElement>('.user-skills__item')
+        .forEach((el) => {
+          const t = el.textContent?.trim();
+          if (t) skillsFromDom.push(t);
+        });
 
       return {
         url: sourceUrl,
-        rating: num(ratingRaw),
-        reviewsCount: num(reviewsRaw),
-        gigs,
+        stateData,
+        fallback: {
+          displayName: text('h1.user-username'),
+          profession: text('.user-profession'),
+          skills: skillsFromDom,
+        },
       };
     }, url);
 
-    logger.info(
-      { gigs: payload.gigs.length, rating: payload.rating },
-      '[profile/kwork] снимок собран',
-    );
-    return {
-      url: payload.url,
-      rating: payload.rating,
-      reviewsCount: payload.reviewsCount,
-      gigs: payload.gigs.slice(0, GIGS_LIMIT) as KworkGigItem[],
-    };
+    return mapSnapshot(raw);
   });
+}
+
+function mapSnapshot(raw: KworkRawSnapshot): KworkProfilePayload {
+  const sd = raw.stateData;
+
+  if (!sd) {
+    logger.warn({ url: raw.url }, '[profile/kwork] window.stateData отсутствует, fallback на DOM');
+    return {
+      url: raw.url,
+      rating: 0,
+      reviewsCount: 0,
+      displayName: emptyToUndef(raw.fallback.displayName),
+      profession: emptyToUndef(raw.fallback.profession),
+      skills: raw.fallback.skills.slice(0, SKILLS_LIMIT),
+      badges: [],
+    };
+  }
+
+  const rating = parseRating(sd.userRating);
+  const reviewsCount = typeof sd.totalReviewsCount === 'number' ? sd.totalReviewsCount : 0;
+  const displayName =
+    typeof sd.userProfileName === 'string' && sd.userProfileName.trim()
+      ? sd.userProfileName.trim()
+      : emptyToUndef(raw.fallback.displayName);
+  const profession =
+    typeof sd.userProfileProfession === 'string' && sd.userProfileProfession.trim()
+      ? sd.userProfileProfession.trim()
+      : emptyToUndef(raw.fallback.profession);
+  const description = sd.userProfileDescription
+    ? stripHtml(sd.userProfileDescription).slice(0, DESCRIPTION_LIMIT)
+    : undefined;
+  const skills = Array.isArray(sd.userSkills)
+    ? sd.userSkills
+        .map((s) => (typeof s?.name === 'string' ? s.name.trim() : ''))
+        .filter((s): s is string => s.length > 0)
+        .slice(0, SKILLS_LIMIT)
+    : raw.fallback.skills.slice(0, SKILLS_LIMIT);
+  const badges = Array.isArray(sd.userProfileBadges)
+    ? sd.userProfileBadges
+        .map(badgeToString)
+        .filter((s): s is string => s.length > 0)
+        .slice(0, BADGES_LIMIT)
+    : [];
+  const lastOnline =
+    typeof sd.lastOnlineAsString === 'string' && sd.lastOnlineAsString.trim()
+      ? sd.lastOnlineAsString.trim()
+      : undefined;
+
+  logger.info(
+    { rating, reviewsCount, skills: skills.length, badges: badges.length },
+    '[profile/kwork] снимок собран',
+  );
+
+  return {
+    url: raw.url,
+    rating,
+    reviewsCount,
+    displayName,
+    profession,
+    description: description && description.length > 0 ? description : undefined,
+    skills,
+    badges,
+    lastOnline,
+  };
+}
+
+function parseRating(v: unknown): number {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string') {
+    const parsed = parseFloat(v.replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function stripHtml(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, ' '))
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const HTML_ENTITY_MAP: Record<string, string> = {
+  '&laquo;': '«',
+  '&raquo;': '»',
+  '&mdash;': '—',
+  '&ndash;': '–',
+  '&nbsp;': ' ',
+  '&amp;': '&',
+  '&quot;': '"',
+  '&apos;': "'",
+  '&lt;': '<',
+  '&gt;': '>',
+  '&hellip;': '…',
+};
+
+function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&[a-z]+;/gi, (m) => HTML_ENTITY_MAP[m.toLowerCase()] ?? m)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+}
+
+function emptyToUndef(s: string): string | undefined {
+  return s.length > 0 ? s : undefined;
+}
+
+function badgeToString(b: unknown): string {
+  if (typeof b === 'string') return b.trim();
+  if (b && typeof b === 'object') {
+    const obj = b as Record<string, unknown>;
+    for (const key of ['name', 'title', 'label', 'text']) {
+      const v = obj[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+  }
+  return '';
 }

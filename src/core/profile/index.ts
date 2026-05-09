@@ -100,7 +100,6 @@ export type {
   FlProfilePayload,
   FlPortfolioItem,
   KworkProfilePayload,
-  KworkGigItem,
   FreelanceruProfilePayload,
   FreelanceruServiceItem,
 } from './types';

@@ -198,19 +198,29 @@ function renderFlSection(snap: SourceSnapshot<FlProfilePayload>): string[] {
 function renderKworkSection(snap: SourceSnapshot<KworkProfilePayload>): string[] {
   const p = snap.payload;
   const lines: string[] = [];
-  lines.push('## Kwork — услуги');
+  const heading = p.displayName ? `## Kwork — ${p.displayName}` : '## Kwork';
+  lines.push(heading);
   lines.push('');
   lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть профиль](${p.url})`);
   lines.push('');
-  if (p.rating > 0) lines.push(`**Рейтинг:** ${p.rating} · **Отзывов:** ${p.reviewsCount}`);
+  if (p.profession) lines.push(`**Профессия:** ${p.profession}`);
+  if (p.rating > 0 || p.reviewsCount > 0) {
+    lines.push(`**Рейтинг:** ${p.rating} · **Отзывов:** ${p.reviewsCount}`);
+  }
+  if (p.lastOnline) lines.push(`_${p.lastOnline}_`);
+  if (p.badges.length > 0) lines.push(`**Бейджи:** ${p.badges.join(', ')}`);
   lines.push('');
-  if (p.gigs.length > 0) {
-    lines.push('### Кворки');
+  if (p.description) {
+    const excerpt = p.description.length > 300 ? `${p.description.slice(0, 300)}…` : p.description;
+    lines.push('### О себе');
     lines.push('');
-    for (const g of p.gigs) {
-      const reviews = g.reviewsCount > 0 ? ` · ${g.reviewsCount} отзыв(ов)` : '';
-      lines.push(`- [${g.title}](${g.link}) — ${g.price}${reviews}`);
-    }
+    lines.push(excerpt);
+    lines.push('');
+  }
+  if (p.skills.length > 0) {
+    lines.push('### Навыки');
+    lines.push('');
+    lines.push(p.skills.join(', '));
     lines.push('');
   }
   return lines;
