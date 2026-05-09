@@ -95,6 +95,20 @@ model RunMetric {
   @@map("run_metrics")
 }
 
+model ProfileSnapshot {
+  id           String   @id @default(uuid()) @db.Uuid
+  githubLogin  String   @map("github_login")
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
+  // { TypeScript: 524000, Go: 12000, ... } — суммарно bytes по топ-репам
+  languagesAgg Json     @default("{}") @map("languages_agg")
+  // [{name, description, language, stars, url, pushedAt, readmeExcerpt}]
+  repos        Json     @default("[]")
+  rawJson      Json?    @map("raw_json")
+
+  @@index([fetchedAt(sort: Desc)])
+  @@map("profile_snapshots")
+}
+
 model NotificationJob {
   id            String    @id @default(uuid()) @db.Uuid
   channel       String // 'telegram' | 'push'
