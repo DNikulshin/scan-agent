@@ -4,6 +4,29 @@
 
 ---
 
+## 2026-05-09 (ночь) — Селекторы FL/Kwork/Freelance.ru закрыты по spec'у пользователя
+
+Spec из `test.md` верифицирован живым smoke (`scripts/smoke-profile.ts`) на профилях `dnikulshin*`. Парсеры теперь возвращают валидные данные. HH вынесен в отдельный трек.
+
+**Что сделано (commits `0ce59b3` + `c5fa64e`, plan `~/.claude/plans/swift-wobbling-wave.md`):**
+- **Kwork** [src/core/profile/kwork.ts](../src/core/profile/kwork.ts) — переход на `window.stateData` через `page.evaluate`. Маппинг: `userRating`/`totalReviewsCount`/`userProfileName`/`userProfileProfession`/`userProfileDescription` (с decode HTML entities `&laquo;`→«, `&mdash;`→— и т.п.)/`userSkills[]`/`userProfileBadges[]`/`lastOnlineAsString`. DOM-fallback на `h1.user-username`/`.user-profession`/`.user-skills__item`. **Контракт payload обновлён**: `KworkProfilePayload` без `gigs`, новые поля синхронно в `dashboard/lib/profile-types.ts` + `renderKworkSection` (MD + UI).
+- **FL** [src/core/profile/fl.ts](../src/core/profile/fl.ts) — двухпроходный fetch: `/rating/` через `div.rating p.b-text__bold` (общий рейтинг), `/portfolio/` через узкий `.b-portfolio__item` + `.user-categories a`. Шумные `[class*="..."]` fallback'и убраны. Login извлекается из URL regex'ом — нормализация базы.
+- **Freelance.ru** [src/core/profile/freelanceru.ts](../src/core/profile/freelanceru.ts) — спек-селектор `div.rating-box span` + regex `\d+`. **Backlog был неправ**: rating=61 — валидное значение, на странице действительно «Рейтинг: 61».
+- **HH** — намеренно не трогали. Public share-link даёт 403 от антибота → отдельный план: storageState/userDataDir + manual login (см. CLAUDE.md раздел «Открытый трек: HH»).
+- **Попутно** (`c5fa64e`): починен [dashboard/components/OrderCard.tsx](../dashboard/components/OrderCard.tsx) под React 19 hooks-rules (хуки внутри try/catch, JSX в try/catch — оба правила теперь errors). `dashboard/eslint.config.mjs` — ignores для git-ignored реликтов `public/swe-worker-*.js` / `public/workbox-*.js` (от удалённого `next-pwa`).
+
+**Smoke-результаты (dnikulshin*):**
+- Kwork: displayName, profession, description (1000-сим. с decoded entities), 12 skills, lastOnline. rating=0/reviewsCount=0 — у профиля нет отзывов (валидно).
+- FL: rating=42 (с /rating/), portfolio=[]/specializations=[] — у dnikulshindev действительно нет публичных работ (отладка `[class*=...]` подтвердила, что на странице только nav-элементы).
+- Freelance.ru: rating=61, services=[] — на профиле блока услуг нет (есть портфолио, но не покрыто spec'ом).
+- Lint root + dashboard + dashboard build — все чистые.
+
+**Утилита:** [scripts/smoke-profile.ts](../scripts/smoke-profile.ts) — ad-hoc smoke без БД. Локально требует `npx playwright install chromium` (~150MB), на VPS/GHA уже в стеке.
+
+**Что в backlog (нефункциональное):** флаг `enabled` per-source, ручной refresh не-GitHub источников из dashboard, FL/Kwork few-shot для `generatePitch`, Telegram-алёрт при 3+ падениях парсера профиля.
+
+---
+
 ## 2026-05-09 (поздний вечер) — Блок 2 расширение: парсеры FL/Kwork/HH/Freelance.ru + housekeeping
 
 Добавлены 4 источника публичных профилей в `ProfileSnapshot`. Сама инфраструктура (БД, фасад, AI-интеграция, dashboard, GHA) задеплоена и валидирована. **Селекторы парсеров требуют живой настройки в следующей сессии** — на текущих сайтах часть полей не подцепилась.

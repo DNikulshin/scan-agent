@@ -103,48 +103,70 @@
 
 ---
 
-## ⚠️ Частично реализовано: Блок 2 расширение — парсеры FL/Kwork/HH/Freelance.ru + housekeeping (2026-05-09)
+## ✅ Завершено: Блок 2 расширение — парсеры FL/Kwork/Freelance.ru + housekeeping (2026-05-09)
 
-**Инфраструктура задеплоена и работает.** GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru / HH.ru (public share-link резюме) / Freelance.ru. **В AI-промпт льётся только HH-таймлайн опыта** (`scoreOrder` + `generatePitch`); FL/Kwork/Freelance.ru хранятся для UI на `/profile` и MD-экспорта. Введён housekeeping: keep last 30 per source + delete `fetchedAt < now - 90d`.
+**Инфраструктура задеплоена 2026-05-09 (commit `193b00d`), селекторы FL/Kwork/Freelance.ru закрыты в тот же день (commits `0ce59b3`+`c5fa64e`, plan `~/.claude/plans/swift-wobbling-wave.md`).** Spec пользователя из `test.md` верифицирован живым smoke на профилях dnikulshin* через [scripts/smoke-profile.ts](scripts/smoke-profile.ts).
 
-**Селекторы парсеров требуют живой настройки** (см. backlog ниже). Smoke-прогон 2026-05-09: HH = 403 (антибот), FL/Kwork/Freelance.ru = снимки записались, но поля частично пустые/кривые. Pipeline не падает.
+GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru / HH.ru (резюме) / Freelance.ru. **В AI-промпт льётся только HH-таймлайн опыта** (`scoreOrder` + `generatePitch`); FL/Kwork/Freelance.ru хранятся для UI на `/profile` и MD-экспорта. Housekeeping: keep last 30 per source + delete `fetchedAt < now - 90d`.
+
+**HH вынесен в отдельный план** (нужна cookie-инфра — см. раздел ниже).
 
 **Карта кода:**
-- БД: `ProfileSnapshot` дополнен `source ProfileSource` (enum github/fl/kwork/hh/freelanceru, default `github`) + `payload Json`. `githubLogin` стал nullable. Индекс `(source, fetched_at desc)`. Миграция `20260509100000_add_profile_snapshot_source` (existing rows backfilled через DEFAULT).
-- Парсеры: [src/core/profile/](src/core/profile/) — `types.ts` (узкие payload-ы), `browser.ts` (`withStealthPage` поверх существующего `parsers/browser.ts`), `hh.ts` / `fl.ts` / `kwork.ts` / `freelanceru.ts`, `housekeeping.ts`, фасад `index.ts` (`refreshAllProfiles` через `Promise.allSettled`, ошибка одного источника не валит остальные).
-- Profile-context: [src/core/profile-context.ts](src/core/profile-context.ts) теперь читает `source=github` для GitHub-снимка и `source=hh` для опыта; новый экспорт `getCachedExperienceContext()`.
-- Analyzer: [src/core/analyzer.ts](src/core/analyzer.ts) пробрасывает HH-experience в оба промпта (если снимка нет — блок не вставляется).
-- Pipeline: [src/index.ts](src/index.ts) после `refreshProfileIfStale` вызывает `refreshAllProfiles` + `cleanupProfileSnapshots`.
-- Config: [src/config.ts](src/config.ts) секция `profile` (`flUrl`, `kworkUrl`, `hhResumeUrl`, `freelanceruUrl`, `snapshotMaxAgeHours`).
-- Dashboard: [dashboard/lib/profile.ts](dashboard/lib/profile.ts) → `getAllSnapshots()` per source + расширенный `formatProfileMd`. [dashboard/lib/profile-types.ts](dashboard/lib/profile-types.ts) — копия payload-ов (dashboard не делит код с агентом, паттерн как `lib/notifications/*`). [dashboard/app/profile/page.tsx](dashboard/app/profile/page.tsx) — секции HH/FL/Kwork/Freelance.ru с пометкой «обновляется по cron агента».
-- GHA: 4 новых vars (`HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`) в [.github/workflows/scan-agent.yml](.github/workflows/scan-agent.yml).
+- БД: `ProfileSnapshot` с `source ProfileSource` (enum github/fl/kwork/hh/freelanceru, default `github`) + `payload Json`. `githubLogin` стал nullable. Индекс `(source, fetched_at desc)`. Миграция `20260509100000_add_profile_snapshot_source`.
+- Парсеры [src/core/profile/](src/core/profile/):
+  - **Kwork** [kwork.ts](src/core/profile/kwork.ts): тащит `window.stateData` через `page.evaluate` (rating, reviewsCount, displayName, profession, description с decode HTML entities, skills, badges, lastOnline). DOM-fallback на `h1.user-username`/`.user-profession`/`.user-skills__item`.
+  - **FL** [fl.ts](src/core/profile/fl.ts): двухпроходный fetch — `/rating/` через `div.rating p.b-text__bold` (общий рейтинг), затем `/portfolio/` через узкий `.b-portfolio__item` + `.user-categories a`. Login извлекается из URL regex'ом.
+  - **Freelance.ru** [freelanceru.ts](src/core/profile/freelanceru.ts): спек-селектор `div.rating-box span` + regex `\d+`.
+  - **HH** [hh.ts](src/core/profile/hh.ts): только публичный share-link `hh.ru/resume/<hash>` (regex-валидация). **На live — 403 от антибота**, см. отдельный план ниже.
+  - `browser.ts` (`withStealthPage` поверх `parsers/browser.ts`), `housekeeping.ts`, фасад `index.ts` (`refreshAllProfiles` через `Promise.allSettled`).
+- Profile-context [src/core/profile-context.ts](src/core/profile-context.ts): `source=github` для языков/репо, `source=hh` для опыта (`getCachedExperienceContext()`).
+- Analyzer [src/core/analyzer.ts](src/core/analyzer.ts): HH-experience в оба промпта (опционально).
+- Pipeline [src/index.ts](src/index.ts): `refreshAllProfiles` + `cleanupProfileSnapshots` после GitHub-refresh.
+- Config [src/config.ts](src/config.ts): секция `profile` (`flUrl`, `kworkUrl`, `hhResumeUrl`, `freelanceruUrl`, `snapshotMaxAgeHours`).
+- Dashboard:
+  - Типы — [dashboard/lib/profile-types.ts](dashboard/lib/profile-types.ts) (зеркало `src/core/profile/types.ts`, KworkProfilePayload без `gigs`).
+  - [dashboard/lib/profile.ts](dashboard/lib/profile.ts) — `getAllSnapshots()`, `formatProfileMd` с `renderKworkSection` под новые поля.
+  - [dashboard/app/profile/page.tsx](dashboard/app/profile/page.tsx) — UI секции с тегами skills/badges и excerpt описания.
+- GHA: 4 vars (`HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`) в [.github/workflows/scan-agent.yml](.github/workflows/scan-agent.yml).
 
 **Решения:**
-- Унификация: одна таблица `ProfileSnapshot` с дискриминатором `source`. Меньше моделей, один cleanup. GitHub продолжает писать в legacy `languagesAgg`/`repos` (бэкуордно), новые источники — в `payload`.
-- AI: только HH в промпт (опыт работы — то, чего GitHub не даёт). FL/Kwork/Freelance.ru — социальное доказательство, но в питч не льём, чтобы не раздувать context window.
+- Унификация: одна таблица `ProfileSnapshot` с дискриминатором `source`. GitHub продолжает писать в legacy `languagesAgg`/`repos` (бэкуордно), новые источники — в `payload`.
+- AI: только HH в промпт (опыт работы — то, чего GitHub не даёт). FL/Kwork/Freelance.ru — социальное доказательство, в питч не льём ради context window.
 - Refresh-кнопка `/profile` остаётся **GitHub-only** — Playwright не тащим в dashboard-контейнер. Не-GitHub источники обновляются по cron агента.
-- Housekeeping вызывается раз за прогон сразу после refresh, best-effort.
+- Kwork: переход на `window.stateData` вместо DOM — JSON стабильнее меняется при редизайне, чем CSS-классы.
+- FL: двухпроходный fetch (~+1 сек) — оправдано, потому что rating живёт на отдельной странице.
+- Decode HTML entities в Kwork description через hardcoded map (`&laquo;`→«, `&mdash;`→— и т.п.) — без отдельной зависимости.
 
 **Critical-нюансы:**
-- HH share-link обязан быть **публичным** (формат `hh.ru/resume/<hash>`), а не приватный URL аккаунта — иначе 403. Парсер валидирует regex'ом до `goto`.
-- Селекторы FL/Kwork/HH-резюме могут устареть (как у парсеров заказов). При смене вёрстки парсер вернёт частичный снимок + `debug-profile-<source>.png` рядом.
-- `dashboard/lib/profile-types.ts` дублирует `src/core/profile/types.ts` — это намеренно, чтобы dashboard не зависел от `src/`.
+- HH share-link обязан быть **публичным** (формат `hh.ru/resume/<hash>`), парсер валидирует regex'ом. Сейчас даёт 403 на проде — см. план ниже.
+- `dashboard/lib/profile-types.ts` дублирует `src/core/profile/types.ts` — намеренно (паттерн `lib/notifications/*`). Обновлять синхронно.
+- Пустой `portfolio[]` / `services[]` для FL/Freelance.ru — это live-данные конкретного профиля (нет публичных работ/услуг), не баг селекторов.
+- `scripts/smoke-profile.ts` — ad-hoc smoke без БД, env'ы `FL_PROFILE_URL`/`KWORK_PROFILE_URL`/`FREELANCERU_PROFILE_URL`. Локально нужен `npx playwright install chromium` (~150MB) — на VPS/GHA уже установлен.
 
-**Шаги для активации в проде:**
-1. `npx prisma migrate deploy` (мигрирует existing GitHub-снимки → `source='github'` через DEFAULT).
-2. Добавить GitHub vars: `HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`. Значения — из `.env.example`.
-3. На VPS — те же URL'ы в `/opt/home-codespaces/.env`.
-4. `workflow_dispatch` — должны появиться 4 новых ProfileSnapshot, проверить через `prisma studio` или `/profile`.
-
-**Backlog (приоритет = подкрутка селекторов):**
-- **HH 403** — public share-link под антиботом Cloudflare/hh.ru. Решение: OAuth API через `hh.ru/oauth/authorize` + регистрация app, доступ к `/me/resumes`. Альтернатива — прокси.
-- **FL селектор** — `[class*="portfolio"]` слишком широкий, ловит nav-ссылки `#profile-nav` («Портфолио», «Прайс-лист») вместо реальных работ. Нужен скоп до основного контента (например, исключить `nav` и `header`).
-- **Kwork** — `.want-card`/`.kwork-item` это селекторы для страницы заказов, не для профиля продавца. Нужно открыть реальный markup `kwork.ru/user/<login>` через headful Playwright и найти контейнер услуг.
-- **Freelance.ru** — `rating=61` пойман через `tryText` наугад, это шум. Селектор реального рейтинга найти на живой странице или признать что его нет в публичном виде.
-- Опционально: флаг `enabled` в `config.profile.{fl,kwork,hh,freelanceru}` чтобы выключать источник env'ом без удаления URL.
-- Ручной refresh не-GitHub источников из dashboard (через outbox-job).
+**Backlog (нефункциональное):**
+- Опциональный флаг `enabled` в `config.profile.{fl,kwork,hh,freelanceru}` чтобы выключать источник env'ом без удаления URL.
+- Ручной refresh не-GitHub источников из dashboard через outbox-job.
 - FL/Kwork few-shot для `generatePitch`.
 - Алёрт в Telegram при падении парсера профиля 3+ раз подряд.
+
+---
+
+## ⏳ Открытый трек: HH-резюме под авторизованной сессией
+
+**Проблема:** HH share-link `hh.ru/resume/<hash>` стабильно даёт 403 даже под Playwright+stealth (Cloudflare/антибот). Прямые запросы к `/api/resumes/mine` тоже 403 даже с XSRF-токеном.
+
+**Решение из spec'а пользователя (`test.md` раздел 4):** headful-браузер с **сохранённым Chrome-профилем** (storageState/userDataDir + manual login через `hh.ru/applicant/resumes`), парсинг DOM по `data-qa` атрибутам:
+- Список: `[data-qa="resume"]` → внутри `[data-qa="resume-title"]`/`[data-qa="title-header"]`/`[data-qa="count-new-views-text"]`/`a[href*="/resume/"]`.
+- Деталь: `[data-qa="resume-personal-name"]`, `[data-qa="resume-experience-item"]` → `position`/`company`/`period`, `[data-qa="skills-tag"]`.
+
+**Что нужно сделать (отдельный план):**
+1. Расширить `withStealthPage`/`createBrowser` в [src/core/profile/browser.ts](src/core/profile/browser.ts): поддержка `storageState` или `userDataDir` через env (например, `HH_PLAYWRIGHT_STORAGE_STATE=/secrets/hh-storage.json`).
+2. CLI-скрипт `scripts/hh-login.ts` для разового manual login: открыть headful-браузер, дождаться пока пользователь введёт логин/пароль/2FA, сохранить `storageState` в файл.
+3. Переписать [src/core/profile/hh.ts](src/core/profile/hh.ts): сменить URL на `https://hh.ru/applicant/resumes`, парсить по data-qa, опционально проходить по детальным страницам.
+4. Деплой: примонтировать `hh-storage.json` через volume в docker-compose агента; secret-файл (или GitHub Actions secret + write to file). Срок жизни сессии HH ~ месяцы, ротация при разлогине.
+5. Альтернатива (отложенная): OAuth через регистрацию HH-app (`hh.ru/oauth/authorize`) + доступ к `/me/resumes` API. Чище, но требует ручной апрув от HH.
+
+**Активный план для следующей сессии:** будет создан в `~/.claude/plans/` при старте.
 
 ---
 
