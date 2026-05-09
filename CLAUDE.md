@@ -101,9 +101,43 @@
 3. Прогон через `workflow_dispatch` — должна появиться запись в `profile_snapshots` (проверить через `prisma studio` или `/profile`).
 4. Открыть `/profile` — должны быть KPI, таблица языков, топ-репы. Кнопка «📥 Скачать MD» отдаёт `text/markdown`.
 
-**Что НЕ сделано (отложено):**
-- Парсеры FL.ru / Kwork / HH профилей — решено по запросу пользователя ограничиться GitHub в этом блоке.
-- Housekeeping старых снапшотов — копятся ~1 запись/сутки, можно почистить позже.
+---
+
+## ✅ Реализовано: Блок 2 расширение — парсеры FL/Kwork/HH/Freelance.ru + housekeeping (2026-05-09)
+
+GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru / HH.ru (public share-link резюме) / Freelance.ru. **В AI-промпт льётся только HH-таймлайн опыта** (`scoreOrder` + `generatePitch`); FL/Kwork/Freelance.ru хранятся для UI на `/profile` и MD-экспорта. Введён housekeeping: keep last 30 per source + delete `fetchedAt < now - 90d`.
+
+**Карта кода:**
+- БД: `ProfileSnapshot` дополнен `source ProfileSource` (enum github/fl/kwork/hh/freelanceru, default `github`) + `payload Json`. `githubLogin` стал nullable. Индекс `(source, fetched_at desc)`. Миграция `20260509100000_add_profile_snapshot_source` (existing rows backfilled через DEFAULT).
+- Парсеры: [src/core/profile/](src/core/profile/) — `types.ts` (узкие payload-ы), `browser.ts` (`withStealthPage` поверх существующего `parsers/browser.ts`), `hh.ts` / `fl.ts` / `kwork.ts` / `freelanceru.ts`, `housekeeping.ts`, фасад `index.ts` (`refreshAllProfiles` через `Promise.allSettled`, ошибка одного источника не валит остальные).
+- Profile-context: [src/core/profile-context.ts](src/core/profile-context.ts) теперь читает `source=github` для GitHub-снимка и `source=hh` для опыта; новый экспорт `getCachedExperienceContext()`.
+- Analyzer: [src/core/analyzer.ts](src/core/analyzer.ts) пробрасывает HH-experience в оба промпта (если снимка нет — блок не вставляется).
+- Pipeline: [src/index.ts](src/index.ts) после `refreshProfileIfStale` вызывает `refreshAllProfiles` + `cleanupProfileSnapshots`.
+- Config: [src/config.ts](src/config.ts) секция `profile` (`flUrl`, `kworkUrl`, `hhResumeUrl`, `freelanceruUrl`, `snapshotMaxAgeHours`).
+- Dashboard: [dashboard/lib/profile.ts](dashboard/lib/profile.ts) → `getAllSnapshots()` per source + расширенный `formatProfileMd`. [dashboard/lib/profile-types.ts](dashboard/lib/profile-types.ts) — копия payload-ов (dashboard не делит код с агентом, паттерн как `lib/notifications/*`). [dashboard/app/profile/page.tsx](dashboard/app/profile/page.tsx) — секции HH/FL/Kwork/Freelance.ru с пометкой «обновляется по cron агента».
+- GHA: 4 новых vars (`HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`) в [.github/workflows/scan-agent.yml](.github/workflows/scan-agent.yml).
+
+**Решения:**
+- Унификация: одна таблица `ProfileSnapshot` с дискриминатором `source`. Меньше моделей, один cleanup. GitHub продолжает писать в legacy `languagesAgg`/`repos` (бэкуордно), новые источники — в `payload`.
+- AI: только HH в промпт (опыт работы — то, чего GitHub не даёт). FL/Kwork/Freelance.ru — социальное доказательство, но в питч не льём, чтобы не раздувать context window.
+- Refresh-кнопка `/profile` остаётся **GitHub-only** — Playwright не тащим в dashboard-контейнер. Не-GitHub источники обновляются по cron агента.
+- Housekeeping вызывается раз за прогон сразу после refresh, best-effort.
+
+**Critical-нюансы:**
+- HH share-link обязан быть **публичным** (формат `hh.ru/resume/<hash>`), а не приватный URL аккаунта — иначе 403. Парсер валидирует regex'ом до `goto`.
+- Селекторы FL/Kwork/HH-резюме могут устареть (как у парсеров заказов). При смене вёрстки парсер вернёт частичный снимок + `debug-profile-<source>.png` рядом.
+- `dashboard/lib/profile-types.ts` дублирует `src/core/profile/types.ts` — это намеренно, чтобы dashboard не зависел от `src/`.
+
+**Шаги для активации в проде:**
+1. `npx prisma migrate deploy` (мигрирует existing GitHub-снимки → `source='github'` через DEFAULT).
+2. Добавить GitHub vars: `HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`. Значения — из `.env.example`.
+3. На VPS — те же URL'ы в `/opt/home-codespaces/.env`.
+4. `workflow_dispatch` — должны появиться 4 новых ProfileSnapshot, проверить через `prisma studio` или `/profile`.
+
+**Backlog:**
+- Ручной refresh не-GitHub источников из dashboard (через outbox-job).
+- FL/Kwork few-shot для `generatePitch`.
+- Алёрт в Telegram при падении парсера профиля 3+ раз подряд.
 
 ---
 

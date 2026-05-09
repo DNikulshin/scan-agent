@@ -95,16 +95,31 @@ model RunMetric {
   @@map("run_metrics")
 }
 
-model ProfileSnapshot {
-  id           String   @id @default(uuid()) @db.Uuid
-  githubLogin  String   @map("github_login")
-  fetchedAt    DateTime @default(now()) @map("fetched_at")
-  // { TypeScript: 524000, Go: 12000, ... } — суммарно bytes по топ-репам
-  languagesAgg Json     @default("{}") @map("languages_agg")
-  // [{name, description, language, stars, url, pushedAt, readmeExcerpt}]
-  repos        Json     @default("[]")
-  rawJson      Json?    @map("raw_json")
+enum ProfileSource {
+  github
+  fl
+  kwork
+  hh
+  freelanceru
 
+  @@map("profile_source")
+}
+
+model ProfileSnapshot {
+  id           String        @id @default(uuid()) @db.Uuid
+  source       ProfileSource @default(github)
+  // Для source=github хранит login; для остальных источников NULL.
+  githubLogin  String?       @map("github_login")
+  fetchedAt    DateTime      @default(now()) @map("fetched_at")
+  // GitHub-специфичные legacy-поля (заполнены только для source=github).
+  languagesAgg Json          @default("{}") @map("languages_agg")
+  repos        Json          @default("[]")
+  // Унифицированный payload — для FL/Kwork/HH/Freelance.ru.
+  // GitHub-снимки могут писать сюда копию languagesAgg+repos для единообразного чтения.
+  payload      Json          @default("{}")
+  rawJson      Json?         @map("raw_json")
+
+  @@index([source, fetchedAt(sort: Desc)])
   @@index([fetchedAt(sort: Desc)])
   @@map("profile_snapshots")
 }

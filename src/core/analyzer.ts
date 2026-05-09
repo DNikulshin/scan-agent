@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { z } from 'zod';
 import { config } from '../config';
-import { getCachedProfileContext, getCachedStack } from './profile-context';
+import { getCachedProfileContext, getCachedStack, getCachedExperienceContext } from './profile-context';
 import { logger } from '../utils/logger';
 import { withRetry, isRetryableHttpError } from '../utils/retry';
 import type { AiUsage, Order, ScoreResult, PitchResult } from '../types';
@@ -138,11 +138,14 @@ export interface ScoreOutcome {
 }
 
 export async function scoreOrder(order: Order): Promise<ScoreOutcome> {
+  const experience = getCachedExperienceContext();
+  const experienceBlock = experience ? `\nОПЫТ РАБОТЫ:\n${experience}\n` : '';
+
   const prompt = `Ты опытный разработчик. Оцени заказ/вакансию: подходит ли под мой стек?
 ВАЖНО: отвечай ТОЛЬКО на русском языке.
 
 МОЙ СТЕК: ${getCachedStack().join(', ')}
-
+${experienceBlock}
 ${SCORING_EXAMPLES}
 
 Теперь оцени:
@@ -202,13 +205,15 @@ export interface PitchOutcome {
 
 export async function generatePitch(order: Order, temperature?: number): Promise<PitchOutcome> {
   const profileCtx = getCachedProfileContext();
+  const experience = getCachedExperienceContext();
+  const experienceBlock = experience ? `\nОПЫТ РАБОТЫ (для справки — упоминай только релевантное):\n${experience}\n` : '';
 
   const prompt = `Ты пишешь отклик на заказ с фриланс-биржи от имени разработчика.
 ВАЖНО: весь текст ТОЛЬКО на русском языке.
 
 ПРОФИЛЬ РАЗРАБОТЧИКА:
 ${profileCtx}
-
+${experienceBlock}
 ЗАКАЗ:
 Название: "${order.title}"
 Описание: ${order.desc || '(не указано)'}

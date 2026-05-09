@@ -1,6 +1,9 @@
+import { ProfileSource } from '@prisma/client';
 import { prisma } from './prisma';
 import { profile } from '../profile';
 import { fetchGithubProfile, type GithubSnapshotInput, type RepoSnapshot } from './github-profile';
+import { summarizeHhExperience } from './profile/hh';
+import type { HhResumePayload } from './profile/types';
 import { logger } from '../utils/logger';
 
 const TOP_LANGS_FOR_STACK = 8;
@@ -15,6 +18,7 @@ interface SnapshotShape {
 
 let cachedContext: string | null = null;
 let cachedSnapshot: SnapshotShape | null = null;
+let cachedExperience: string | null = null;
 
 function snapshotFromDb(row: {
   githubLogin: string;
@@ -32,20 +36,46 @@ function snapshotFromDb(row: {
 
 async function loadLatestSnapshot(): Promise<SnapshotShape | null> {
   const row = await prisma.profileSnapshot.findFirst({
+    where: { source: ProfileSource.github },
     orderBy: { fetchedAt: 'desc' },
   });
-  return row ? snapshotFromDb(row) : null;
+  if (!row || !row.githubLogin) return null;
+  return snapshotFromDb({
+    githubLogin: row.githubLogin,
+    fetchedAt: row.fetchedAt,
+    languagesAgg: row.languagesAgg,
+    repos: row.repos,
+  });
+}
+
+async function loadHhExperience(): Promise<string | null> {
+  const row = await prisma.profileSnapshot.findFirst({
+    where: { source: ProfileSource.hh },
+    orderBy: { fetchedAt: 'desc' },
+    select: { payload: true },
+  });
+  if (!row) return null;
+  const payload = row.payload as unknown as HhResumePayload | null;
+  if (!payload || !payload.experience || payload.experience.length === 0) return null;
+  const text = summarizeHhExperience(payload.experience);
+  return text || null;
 }
 
 async function saveSnapshot(input: GithubSnapshotInput): Promise<SnapshotShape> {
   const row = await prisma.profileSnapshot.create({
     data: {
+      source: ProfileSource.github,
       githubLogin: input.githubLogin,
       languagesAgg: input.languagesAgg,
       repos: input.repos as object[],
     },
   });
-  return snapshotFromDb(row);
+  return snapshotFromDb({
+    githubLogin: row.githubLogin ?? input.githubLogin,
+    fetchedAt: row.fetchedAt,
+    languagesAgg: row.languagesAgg,
+    repos: row.repos,
+  });
 }
 
 /** Топ-N языков по bytes — derived stack. */
@@ -106,6 +136,12 @@ function buildContext(snapshot: SnapshotShape | null): string {
 export async function loadProfileContext(): Promise<string> {
   cachedSnapshot = await loadLatestSnapshot();
   cachedContext = buildContext(cachedSnapshot);
+  try {
+    cachedExperience = await loadHhExperience();
+  } catch (err) {
+    logger.warn({ err }, '[profile] не удалось прогреть HH-experience, продолжаем без него');
+    cachedExperience = null;
+  }
   return cachedContext;
 }
 
@@ -120,6 +156,11 @@ export function getCachedProfileContext(): string {
 /** Sync stack для scoreOrder (отдельный slot чтобы не парсить контекст). */
 export function getCachedStack(): string[] {
   return mergeStack(cachedSnapshot);
+}
+
+/** HH-таймлайн опыта в текстовом формате — `null`, если HH-снимка ещё нет. */
+export function getCachedExperienceContext(): string | null {
+  return cachedExperience;
 }
 
 interface RefreshOpts {

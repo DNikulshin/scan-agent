@@ -1,5 +1,11 @@
 import Link from 'next/link';
-import { getLatestSnapshot, languagesByPct } from '@/lib/profile';
+import { getAllSnapshots, languagesByPct } from '@/lib/profile';
+import type {
+  HhResumePayload,
+  FlProfilePayload,
+  KworkProfilePayload,
+  FreelanceruProfilePayload,
+} from '@/lib/profile-types';
 import { RefreshButton } from './RefreshButton';
 
 export const dynamic = 'force-dynamic';
@@ -15,7 +21,8 @@ function fmtAge(iso: string): string {
 }
 
 export default async function ProfilePage(): Promise<React.ReactElement> {
-  const snap = await getLatestSnapshot();
+  const all = await getAllSnapshots();
+  const snap = all.github;
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
@@ -23,7 +30,7 @@ export default async function ProfilePage(): Promise<React.ReactElement> {
         <div>
           <h1 className="text-2xl font-bold text-white mb-1">👤 Профиль</h1>
           <p className="text-gray-400 text-sm">
-            Снимок из публичных репозиториев GitHub. Используется AI для скоринга и генерации питча.
+            Снимки из GitHub + HH/FL/Kwork/Freelance.ru. AI-промпт берёт стек из GitHub и опыт работы из HH.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:shrink-0">
@@ -44,9 +51,9 @@ export default async function ProfilePage(): Promise<React.ReactElement> {
         </div>
       </div>
 
-      {!snap && (
+      {!snap && !all.hh && !all.fl && !all.kwork && !all.freelanceru && (
         <div className="bg-yellow-900/30 border border-yellow-800 rounded-lg p-4 text-yellow-200 text-sm">
-          Снимка ещё нет. Запустите агента (он создаст автоматически) или нажмите «Обновить».
+          Снимков ещё нет. Запустите агента (он создаст автоматически) или нажмите «Обновить» (только GitHub).
         </div>
       )}
 
@@ -94,7 +101,7 @@ export default async function ProfilePage(): Promise<React.ReactElement> {
             </div>
           </section>
 
-          <section>
+          <section className="mb-8">
             <h2 className="text-lg font-semibold text-white mb-3">Топ-репозитории</h2>
             <div className="space-y-3">
               {snap.repos.map((r) => (
@@ -128,7 +135,151 @@ export default async function ProfilePage(): Promise<React.ReactElement> {
           </section>
         </>
       )}
+
+      {all.hh && <HhSection fetchedAt={all.hh.fetchedAt} payload={all.hh.payload} />}
+      {all.fl && <FlSection fetchedAt={all.fl.fetchedAt} payload={all.fl.payload} />}
+      {all.kwork && <KworkSection fetchedAt={all.kwork.fetchedAt} payload={all.kwork.payload} />}
+      {all.freelanceru && <FreelanceruSection fetchedAt={all.freelanceru.fetchedAt} payload={all.freelanceru.payload} />}
     </div>
+  );
+}
+
+function SourceHeader({ title, fetchedAt, link }: { title: string; fetchedAt: string; link: string }): React.ReactElement {
+  return (
+    <div className="mb-3 flex items-baseline justify-between gap-2 flex-wrap">
+      <h2 className="text-lg font-semibold text-white">{title}</h2>
+      <div className="text-xs text-gray-500">
+        {fmtAge(fetchedAt)} · <a href={link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">открыть</a> · обновляется по cron агента
+      </div>
+    </div>
+  );
+}
+
+function HhSection({ fetchedAt, payload }: { fetchedAt: string; payload: HhResumePayload }): React.ReactElement {
+  return (
+    <section className="mb-8">
+      <SourceHeader title="HH.ru — резюме" fetchedAt={fetchedAt} link={payload.url} />
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+        <div className="text-sm text-gray-300 space-y-1">
+          {payload.title && <div><span className="text-gray-500">Должность:</span> <span className="text-white">{payload.title}</span></div>}
+          {payload.area && <div><span className="text-gray-500">Локация:</span> {payload.area}</div>}
+          {payload.salary && <div><span className="text-gray-500">Желаемая ЗП:</span> {payload.salary}</div>}
+        </div>
+
+        {payload.experience.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-400 mb-2">Опыт работы</h3>
+            <ul className="space-y-2 text-sm">
+              {payload.experience.map((e, i) => (
+                <li key={`${e.company}-${i}`}>
+                  <div className="text-gray-300">
+                    <span className="text-gray-500 font-mono text-xs">{e.period}</span>{' '}
+                    <span className="text-white">{e.company}</span> · {e.position}
+                  </div>
+                  {e.summary && <div className="text-gray-400 text-xs mt-0.5">{e.summary}</div>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {payload.skills.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold text-gray-400 mb-2">Ключевые навыки</h3>
+            <div className="flex flex-wrap gap-1.5">
+              {payload.skills.map((s) => (
+                <span key={s} className="px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 border border-gray-700">{s}</span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FlSection({ fetchedAt, payload }: { fetchedAt: string; payload: FlProfilePayload }): React.ReactElement {
+  return (
+    <section className="mb-8">
+      <SourceHeader title="FL.ru — портфолио" fetchedAt={fetchedAt} link={payload.url} />
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 text-sm">
+        {(payload.rating > 0 || payload.reviewsCount > 0) && (
+          <div className="text-gray-300">
+            <span className="text-white">Рейтинг {payload.rating}</span> · {payload.reviewsCount} отзыв(ов)
+          </div>
+        )}
+        {payload.specializations.length > 0 && (
+          <div className="text-gray-400 text-xs">{payload.specializations.join(' · ')}</div>
+        )}
+        {payload.portfolio.length > 0 && (
+          <ul className="space-y-2">
+            {payload.portfolio.map((w, i) => (
+              <li key={`${w.title}-${i}`}>
+                <a href={w.link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                  {w.title}
+                </a>
+                {w.description && <span className="text-gray-400"> — {w.description}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function KworkSection({ fetchedAt, payload }: { fetchedAt: string; payload: KworkProfilePayload }): React.ReactElement {
+  return (
+    <section className="mb-8">
+      <SourceHeader title="Kwork — услуги" fetchedAt={fetchedAt} link={payload.url} />
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 text-sm">
+        {(payload.rating > 0 || payload.reviewsCount > 0) && (
+          <div className="text-gray-300">
+            <span className="text-white">Рейтинг {payload.rating}</span> · {payload.reviewsCount} отзыв(ов)
+          </div>
+        )}
+        {payload.gigs.length > 0 && (
+          <ul className="space-y-2">
+            {payload.gigs.map((g, i) => (
+              <li key={`${g.title}-${i}`}>
+                <a href={g.link} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+                  {g.title}
+                </a>
+                <span className="text-gray-400"> — {g.price}</span>
+                {g.reviewsCount > 0 && <span className="text-gray-500 text-xs"> · {g.reviewsCount} отзыв(ов)</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function FreelanceruSection({
+  fetchedAt,
+  payload,
+}: {
+  fetchedAt: string;
+  payload: FreelanceruProfilePayload;
+}): React.ReactElement {
+  return (
+    <section className="mb-8">
+      <SourceHeader title="Freelance.ru" fetchedAt={fetchedAt} link={payload.url} />
+      <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3 text-sm">
+        {payload.rating > 0 && <div className="text-gray-300">Рейтинг <span className="text-white">{payload.rating}</span></div>}
+        {payload.services.length > 0 && (
+          <ul className="space-y-2">
+            {payload.services.map((s, i) => (
+              <li key={`${s.title}-${i}`}>
+                <span className="text-white">{s.title}</span>
+                {s.description && <span className="text-gray-400"> — {s.description}</span>}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
   );
 }
 

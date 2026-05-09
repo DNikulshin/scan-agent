@@ -69,6 +69,12 @@ jobs:
           GH_PROFILE_LOGIN: ${{ vars.GH_PROFILE_LOGIN }}
           # Встроенный токен GHA: 5000 req/час, public_repo scope из коробки.
           GH_PROFILE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ── Profile snapshots: FL/Kwork/HH-резюме/Freelance.ru (Блок 2 расширение) ──
+          # Все 4 — публичные URL'ы, через vars; если пусто — парсер пропускается.
+          HH_RESUME_PUBLIC_URL: ${{ vars.HH_RESUME_PUBLIC_URL }}
+          FL_PROFILE_URL: ${{ vars.FL_PROFILE_URL }}
+          KWORK_PROFILE_URL: ${{ vars.KWORK_PROFILE_URL }}
+          FREELANCERU_PROFILE_URL: ${{ vars.FREELANCERU_PROFILE_URL }}
           # ── Dashboard / Supabase / Push ──
           # VAPID_* пока требуются validateConfig (push.ts удалён, но валидация
           # ещё ссылается на ключи; будет вычищена отдельно).

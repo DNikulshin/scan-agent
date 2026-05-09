@@ -1,9 +1,16 @@
-// Профиль (Блок 2): чтение последнего ProfileSnapshot + рендер MD.
+// Профиль (Блок 2): чтение последних ProfileSnapshot per source + рендер MD.
 // Источник правды для /profile, /api/profile/export, /api/profile/refresh.
 
+import { ProfileSource } from '@prisma/client';
 import { prisma } from './db';
 import type { RepoSnapshot, GithubSnapshotInput } from './profile-fetch';
 import { fetchGithubProfile } from './profile-fetch';
+import type {
+  HhResumePayload,
+  FlProfilePayload,
+  KworkProfilePayload,
+  FreelanceruProfilePayload,
+} from './profile-types';
 
 export interface ProfileSnapshotShape {
   id: string;
@@ -15,9 +22,10 @@ export interface ProfileSnapshotShape {
 
 export async function getLatestSnapshot(): Promise<ProfileSnapshotShape | null> {
   const row = await prisma.profileSnapshot.findFirst({
+    where: { source: ProfileSource.github },
     orderBy: { fetchedAt: 'desc' },
   });
-  if (!row) return null;
+  if (!row || !row.githubLogin) return null;
   return {
     id: row.id,
     githubLogin: row.githubLogin,
@@ -27,10 +35,48 @@ export async function getLatestSnapshot(): Promise<ProfileSnapshotShape | null> 
   };
 }
 
+export interface SourceSnapshot<T> {
+  fetchedAt: string;
+  payload: T;
+}
+
+export interface AllSnapshots {
+  github: ProfileSnapshotShape | null;
+  hh: SourceSnapshot<HhResumePayload> | null;
+  fl: SourceSnapshot<FlProfilePayload> | null;
+  kwork: SourceSnapshot<KworkProfilePayload> | null;
+  freelanceru: SourceSnapshot<FreelanceruProfilePayload> | null;
+}
+
+async function loadOne<T>(source: ProfileSource): Promise<SourceSnapshot<T> | null> {
+  const row = await prisma.profileSnapshot.findFirst({
+    where: { source },
+    orderBy: { fetchedAt: 'desc' },
+    select: { fetchedAt: true, payload: true },
+  });
+  if (!row) return null;
+  return {
+    fetchedAt: row.fetchedAt.toISOString(),
+    payload: row.payload as unknown as T,
+  };
+}
+
+export async function getAllSnapshots(): Promise<AllSnapshots> {
+  const [github, hh, fl, kwork, freelanceru] = await Promise.all([
+    getLatestSnapshot(),
+    loadOne<HhResumePayload>(ProfileSource.hh),
+    loadOne<FlProfilePayload>(ProfileSource.fl),
+    loadOne<KworkProfilePayload>(ProfileSource.kwork),
+    loadOne<FreelanceruProfilePayload>(ProfileSource.freelanceru),
+  ]);
+  return { github, hh, fl, kwork, freelanceru };
+}
+
 export async function refreshSnapshot(login: string, token?: string): Promise<ProfileSnapshotShape> {
   const input: GithubSnapshotInput = await fetchGithubProfile(login, token);
   const row = await prisma.profileSnapshot.create({
     data: {
+      source: ProfileSource.github,
       githubLogin: input.githubLogin,
       languagesAgg: input.languagesAgg,
       repos: input.repos as unknown as object[],
@@ -38,7 +84,7 @@ export async function refreshSnapshot(login: string, token?: string): Promise<Pr
   });
   return {
     id: row.id,
-    githubLogin: row.githubLogin,
+    githubLogin: row.githubLogin ?? input.githubLogin,
     fetchedAt: row.fetchedAt.toISOString(),
     languagesAgg: input.languagesAgg,
     repos: input.repos,
@@ -54,16 +100,16 @@ export function languagesByPct(agg: Record<string, number>): Array<{ lang: strin
     .map(([lang, bytes]) => ({ lang, bytes, pct: bytes / total }));
 }
 
-export function formatProfileMd(snap: ProfileSnapshotShape): string {
-  const lines: string[] = [];
-  const dateStr = new Date(snap.fetchedAt).toISOString().slice(0, 19).replace('T', ' ');
+function fmtDate(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 19).replace('T', ' ');
+}
 
+function renderGithubSection(snap: ProfileSnapshotShape): string[] {
+  const lines: string[] = [];
   lines.push(`# Profile snapshot — github.com/${snap.githubLogin}`);
   lines.push('');
-  lines.push(`Снимок собран: ${dateStr} UTC`);
+  lines.push(`Снимок собран: ${fmtDate(snap.fetchedAt)} UTC`);
   lines.push('');
-
-  // Языки
   lines.push('## Стек по языкам (bytes)');
   lines.push('');
   const langs = languagesByPct(snap.languagesAgg);
@@ -77,8 +123,6 @@ export function formatProfileMd(snap: ProfileSnapshotShape): string {
     }
   }
   lines.push('');
-
-  // Топ-репозитории
   lines.push(`## Репозитории (${snap.repos.length})`);
   lines.push('');
   for (const r of snap.repos) {
@@ -96,6 +140,109 @@ export function formatProfileMd(snap: ProfileSnapshotShape): string {
     lines.push(`_pushed: ${r.pushedAt.slice(0, 10)}_`);
     lines.push('');
   }
+  return lines;
+}
 
-  return lines.join('\n');
+function renderHhSection(snap: SourceSnapshot<HhResumePayload>): string[] {
+  const p = snap.payload;
+  const lines: string[] = [];
+  lines.push(`## HH.ru — резюме`);
+  lines.push('');
+  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть резюме](${p.url})`);
+  lines.push('');
+  if (p.title) lines.push(`**Должность:** ${p.title}`);
+  if (p.area) lines.push(`**Локация:** ${p.area}`);
+  if (p.salary) lines.push(`**Желаемая зарплата:** ${p.salary}`);
+  lines.push('');
+  if (p.experience.length > 0) {
+    lines.push('### Опыт работы');
+    lines.push('');
+    for (const e of p.experience) {
+      lines.push(`- **${e.period}** — ${e.company} · ${e.position}`);
+      if (e.summary) lines.push(`  > ${e.summary}`);
+    }
+    lines.push('');
+  }
+  if (p.skills.length > 0) {
+    lines.push('### Ключевые навыки');
+    lines.push('');
+    lines.push(p.skills.join(', '));
+    lines.push('');
+  }
+  return lines;
+}
+
+function renderFlSection(snap: SourceSnapshot<FlProfilePayload>): string[] {
+  const p = snap.payload;
+  const lines: string[] = [];
+  lines.push('## FL.ru — портфолио');
+  lines.push('');
+  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть профиль](${p.url})`);
+  lines.push('');
+  if (p.rating > 0) lines.push(`**Рейтинг:** ${p.rating} · **Отзывов:** ${p.reviewsCount}`);
+  if (p.specializations.length > 0) {
+    lines.push(`**Специализации:** ${p.specializations.join(', ')}`);
+  }
+  lines.push('');
+  if (p.portfolio.length > 0) {
+    lines.push('### Работы');
+    lines.push('');
+    for (const w of p.portfolio) {
+      lines.push(`- [${w.title}](${w.link})${w.description ? ` — ${w.description}` : ''}`);
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
+function renderKworkSection(snap: SourceSnapshot<KworkProfilePayload>): string[] {
+  const p = snap.payload;
+  const lines: string[] = [];
+  lines.push('## Kwork — услуги');
+  lines.push('');
+  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть профиль](${p.url})`);
+  lines.push('');
+  if (p.rating > 0) lines.push(`**Рейтинг:** ${p.rating} · **Отзывов:** ${p.reviewsCount}`);
+  lines.push('');
+  if (p.gigs.length > 0) {
+    lines.push('### Кворки');
+    lines.push('');
+    for (const g of p.gigs) {
+      const reviews = g.reviewsCount > 0 ? ` · ${g.reviewsCount} отзыв(ов)` : '';
+      lines.push(`- [${g.title}](${g.link}) — ${g.price}${reviews}`);
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
+function renderFreelanceruSection(snap: SourceSnapshot<FreelanceruProfilePayload>): string[] {
+  const p = snap.payload;
+  const lines: string[] = [];
+  lines.push('## Freelance.ru');
+  lines.push('');
+  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть профиль](${p.url})`);
+  lines.push('');
+  if (p.rating > 0) lines.push(`**Рейтинг:** ${p.rating}`);
+  lines.push('');
+  if (p.services.length > 0) {
+    lines.push('### Услуги');
+    lines.push('');
+    for (const s of p.services) {
+      lines.push(`- **${s.title}**${s.description ? ` — ${s.description}` : ''}`);
+    }
+    lines.push('');
+  }
+  return lines;
+}
+
+export function formatProfileMd(snap: ProfileSnapshotShape | null, all?: AllSnapshots): string {
+  const sections: string[][] = [];
+  if (snap) sections.push(renderGithubSection(snap));
+  if (all?.hh) sections.push(renderHhSection(all.hh));
+  if (all?.fl) sections.push(renderFlSection(all.fl));
+  if (all?.kwork) sections.push(renderKworkSection(all.kwork));
+  if (all?.freelanceru) sections.push(renderFreelanceruSection(all.freelanceru));
+  if (sections.length === 0) return '# Profile snapshot\n\n_нет данных_\n';
+  return sections.map((s) => s.join('\n')).join('\n---\n\n');
 }
