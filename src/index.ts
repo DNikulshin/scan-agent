@@ -4,6 +4,7 @@ import { getTrashReason } from "./core/filter";
 import { analyzeOrder, scoreOrder } from "./core/analyzer";
 import { extractTags } from "./core/tagger";
 import { RunMetrics } from "./core/metrics";
+import { refreshProfileIfStale, loadProfileContext } from "./core/profile-context";
 import {
   KworkParser,
   FlParser,
@@ -43,6 +44,14 @@ async function run(): Promise<void> {
 
   telegram.startCallbackListener();
   await storage.cleanup(30);
+
+  // Profile (GitHub) — обновляем снимок раз в N часов и прогреваем кэш для AI промптов
+  await refreshProfileIfStale({
+    maxAgeHours: config.github.snapshotMaxAgeHours,
+    login: config.github.login,
+    token: config.github.token,
+  });
+  await loadProfileContext();
 
   const settings = await storage.getSettings();
   logger.info({ settings }, "Запуск агента");

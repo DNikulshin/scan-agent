@@ -219,6 +219,14 @@ export const config = {
     minKeywordScore: Number(process.env.HH_MIN_KEYWORD_SCORE || "10"),
   },
 
+  /** GitHub профиль — источник динамического ProfileSnapshot (Блок 2).
+   *  Префикс `GH_` (не `GITHUB_`) — GitHub блокирует пользовательские vars/secrets с GITHUB_*. */
+  github: {
+    login: process.env.GH_PROFILE_LOGIN ?? "",
+    token: process.env.GH_PROFILE_TOKEN || undefined,
+    snapshotMaxAgeHours: Number(process.env.GH_PROFILE_MAX_AGE_HOURS ?? "24"),
+  },
+
   /** Push notifications */
   push: {
     vapid: {

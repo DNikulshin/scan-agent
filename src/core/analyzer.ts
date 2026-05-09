@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { z } from 'zod';
 import { config } from '../config';
-import { profile, getProfileContext } from '../profile';
+import { getCachedProfileContext, getCachedStack } from './profile-context';
 import { logger } from '../utils/logger';
 import { withRetry, isRetryableHttpError } from '../utils/retry';
 import type { AiUsage, Order, ScoreResult, PitchResult } from '../types';
@@ -141,7 +141,7 @@ export async function scoreOrder(order: Order): Promise<ScoreOutcome> {
   const prompt = `Ты опытный разработчик. Оцени заказ/вакансию: подходит ли под мой стек?
 ВАЖНО: отвечай ТОЛЬКО на русском языке.
 
-МОЙ СТЕК: ${profile.stack.join(', ')}
+МОЙ СТЕК: ${getCachedStack().join(', ')}
 
 ${SCORING_EXAMPLES}
 
@@ -201,7 +201,7 @@ export interface PitchOutcome {
 }
 
 export async function generatePitch(order: Order, temperature?: number): Promise<PitchOutcome> {
-  const profileCtx = getProfileContext();
+  const profileCtx = getCachedProfileContext();
 
   const prompt = `Ты пишешь отклик на заказ с фриланс-биржи от имени разработчика.
 ВАЖНО: весь текст ТОЛЬКО на русском языке.
