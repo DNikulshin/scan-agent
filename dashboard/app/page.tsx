@@ -141,12 +141,20 @@ function PageComponent() {
             <h1 className="text-2xl font-bold text-white mb-1">🔍 ScanAgent</h1>
             <p className="text-gray-400 text-sm">Заказы с фриланс-бирж · обновляется каждые 30 мин</p>
           </div>
-          <a
-            href="/stats"
-            className="shrink-0 px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors"
-          >
-            📊 Статистика
-          </a>
+          <div className="shrink-0 flex flex-col sm:flex-row gap-2">
+            <a
+              href="/profile"
+              className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors text-center"
+            >
+              👤 Профиль
+            </a>
+            <a
+              href="/stats"
+              className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors text-center"
+            >
+              📊 Статистика
+            </a>
+          </div>
         </div>
         {(() => {
           const applied = orders?.filter(o => o.status === 'applied') ?? [];
