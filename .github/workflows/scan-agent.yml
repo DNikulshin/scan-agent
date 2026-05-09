@@ -63,6 +63,12 @@ jobs:
           HH_MIN_KEYWORD_SCORE: ${{ secrets.HH_MIN_KEYWORD_SCORE }}
           # ── БД (Prisma Postgres, pooled URL — cron-агенту LISTEN не нужен) ──
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          # ── GitHub профиль (Блок 2: динамический ProfileSnapshot) ──
+          # GH_PROFILE_LOGIN — не секрет, через vars; если пусто — fallback на static profile.ts.
+          # Префикс GH_ а не GITHUB_, потому что GitHub блокирует пользовательские vars/secrets с GITHUB_*.
+          GH_PROFILE_LOGIN: ${{ vars.GH_PROFILE_LOGIN }}
+          # Встроенный токен GHA: 5000 req/час, public_repo scope из коробки.
+          GH_PROFILE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # ── Dashboard / Supabase / Push ──
           # VAPID_* пока требуются validateConfig (push.ts удалён, но валидация
           # ещё ссылается на ключи; будет вычищена отдельно).
