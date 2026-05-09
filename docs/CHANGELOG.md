@@ -4,6 +4,32 @@
 
 ---
 
+## 2026-05-09 (поздний вечер) — Блок 2 расширение: парсеры FL/Kwork/HH/Freelance.ru + housekeeping
+
+Добавлены 4 источника публичных профилей в `ProfileSnapshot`. Сама инфраструктура (БД, фасад, AI-интеграция, dashboard, GHA) задеплоена и валидирована. **Селекторы парсеров требуют живой настройки в следующей сессии** — на текущих сайтах часть полей не подцепилась.
+
+**Что сделано (commit `193b00d`, deployed 2026-05-09):**
+- БД: `ProfileSnapshot.source` (enum github/fl/kwork/hh/freelanceru, default `github`) + `payload Json` + индекс `(source, fetched_at desc)`. Миграция `20260509100000_add_profile_snapshot_source` применена в проде. Existing GitHub-снимки backfilled через DEFAULT (count = 2 → 2 после миграции, ✅).
+- Парсеры: [src/core/profile/](../src/core/profile/) — 4 fetcher'а (FL/Kwork/HH/Freelance.ru) через единый `withStealthPage` (Playwright + puppeteer-extra-stealth, реюз `parsers/browser.ts`). Фасад `refreshAllProfiles` через `Promise.allSettled` — ошибка одного источника не валит остальные. `cleanupProfileSnapshots`: keep last 30 per source + delete `>90d`.
+- AI: [src/core/profile-context.ts](../src/core/profile-context.ts) → `getCachedExperienceContext()` читает HH-таймлайн → пробрасывается в `scoreOrder` + `generatePitch`. **Только HH** льётся в промпт (FL/Kwork/Freelance.ru — для UI). Если HH-снимка нет, блок не вставляется (поведение до правок не меняется).
+- Dashboard: [dashboard/lib/profile.ts](../dashboard/lib/profile.ts) → `getAllSnapshots()` per source + расширенный `formatProfileMd`. [dashboard/app/profile/page.tsx](../dashboard/app/profile/page.tsx) — отдельные секции HH/FL/Kwork/Freelance.ru. Refresh-кнопка осталась GitHub-only (Playwright не тащим в dashboard-контейнер).
+- GHA: 4 vars `HH_RESUME_PUBLIC_URL`, `FL_PROFILE_URL`, `KWORK_PROFILE_URL`, `FREELANCERU_PROFILE_URL`.
+
+**Smoke-проверка через workflow_dispatch:**
+- ✅ Pipeline не упал, парсеры заказов отработали штатно (84 FL + 12 Kwork + 18 Freelance.ru + 60 HH).
+- ✅ Снимки записались для FL/Kwork/Freelance.ru.
+- ❌ HH — **403 на public share-link**. Cloudflare/антибот hh.ru поверх stealth. Это не селектор, это серверная защита. Решение — отдельной задачей: либо OAuth API (регистрация hh.ru app), либо прокси.
+- ⚠️ FL: `portfolio=2` — оба элемента это nav-ссылки `#profile-nav` («Портфолио», «Прайс-лист»), а не реальные работы. Селектор `[class*="portfolio"]` слишком широкий.
+- ⚠️ Kwork: `gigs=0, rating=0` — селекторы `.want-card`/`.kwork-item` (списки заказов) не подходят для страницы продавца. Нужен другой markup.
+- ⚠️ Freelance.ru: `rating=61` — `tryText` поймал случайное число; реальный рейтинг — другой селектор.
+
+**Backlog для следующей сессии:**
+1. Запустить локально headful Playwright против каждого URL (4 шт.), найти реальные классы через DevTools / Inspector.
+2. Решить HH 403 — приоритет: OAuth API через `hh.ru/oauth/authorize` с регистрацией app (даёт доступ к `/me/resumes`).
+3. Опционально: добавить флаг `enabled` в `config.profile.{fl,kwork,hh,freelanceru}` чтобы можно было выключить источник через env, не убирая URL.
+
+---
+
 ## 2026-05-09 — FL.ru: фильтр платных откликов
 
 На FL.ru проекты с платным откликом приходили в общую выдачу — тратили AI-токены, попадали в Telegram, отвлекали. Добавлен авто-клик чекбокса «Не требуется оплата отклика» перед парсингом.

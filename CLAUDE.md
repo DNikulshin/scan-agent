@@ -103,9 +103,11 @@
 
 ---
 
-## ✅ Реализовано: Блок 2 расширение — парсеры FL/Kwork/HH/Freelance.ru + housekeeping (2026-05-09)
+## ⚠️ Частично реализовано: Блок 2 расширение — парсеры FL/Kwork/HH/Freelance.ru + housekeeping (2026-05-09)
 
-GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru / HH.ru (public share-link резюме) / Freelance.ru. **В AI-промпт льётся только HH-таймлайн опыта** (`scoreOrder` + `generatePitch`); FL/Kwork/Freelance.ru хранятся для UI на `/profile` и MD-экспорта. Введён housekeeping: keep last 30 per source + delete `fetchedAt < now - 90d`.
+**Инфраструктура задеплоена и работает.** GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru / HH.ru (public share-link резюме) / Freelance.ru. **В AI-промпт льётся только HH-таймлайн опыта** (`scoreOrder` + `generatePitch`); FL/Kwork/Freelance.ru хранятся для UI на `/profile` и MD-экспорта. Введён housekeeping: keep last 30 per source + delete `fetchedAt < now - 90d`.
+
+**Селекторы парсеров требуют живой настройки** (см. backlog ниже). Smoke-прогон 2026-05-09: HH = 403 (антибот), FL/Kwork/Freelance.ru = снимки записались, но поля частично пустые/кривые. Pipeline не падает.
 
 **Карта кода:**
 - БД: `ProfileSnapshot` дополнен `source ProfileSource` (enum github/fl/kwork/hh/freelanceru, default `github`) + `payload Json`. `githubLogin` стал nullable. Индекс `(source, fetched_at desc)`. Миграция `20260509100000_add_profile_snapshot_source` (existing rows backfilled через DEFAULT).
@@ -134,7 +136,12 @@ GitHub-снимок дополнен 4 источниками: FL.ru / Kwork.ru 
 3. На VPS — те же URL'ы в `/opt/home-codespaces/.env`.
 4. `workflow_dispatch` — должны появиться 4 новых ProfileSnapshot, проверить через `prisma studio` или `/profile`.
 
-**Backlog:**
+**Backlog (приоритет = подкрутка селекторов):**
+- **HH 403** — public share-link под антиботом Cloudflare/hh.ru. Решение: OAuth API через `hh.ru/oauth/authorize` + регистрация app, доступ к `/me/resumes`. Альтернатива — прокси.
+- **FL селектор** — `[class*="portfolio"]` слишком широкий, ловит nav-ссылки `#profile-nav` («Портфолио», «Прайс-лист») вместо реальных работ. Нужен скоп до основного контента (например, исключить `nav` и `header`).
+- **Kwork** — `.want-card`/`.kwork-item` это селекторы для страницы заказов, не для профиля продавца. Нужно открыть реальный markup `kwork.ru/user/<login>` через headful Playwright и найти контейнер услуг.
+- **Freelance.ru** — `rating=61` пойман через `tryText` наугад, это шум. Селектор реального рейтинга найти на живой странице или признать что его нет в публичном виде.
+- Опционально: флаг `enabled` в `config.profile.{fl,kwork,hh,freelanceru}` чтобы выключать источник env'ом без удаления URL.
 - Ручной refresh не-GitHub источников из dashboard (через outbox-job).
 - FL/Kwork few-shot для `generatePitch`.
 - Алёрт в Telegram при падении парсера профиля 3+ раз подряд.
