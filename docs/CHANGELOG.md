@@ -4,6 +4,31 @@
 
 ---
 
+## 2026-05-09 (вечер) — Скрыть HH-мусор на главной + MD-экспорт заказов
+
+Долго раздражало: dashboard показывал в секции «🆕 Новые» HH-вакансии со score=0 (Аналитик 1С, Lua программист и т.п.). В Telegram они корректно не уходили — pre-filter в [src/index.ts](../src/index.ts) ловит их через `hardExclude`/`minKeywordScore` и помечает `score: 0` без `enqueueNotifications`. Но `markProcessed` пишет их в БД для дедупа со `status: 'new'`, и фронт по дефолту с фильтром «Любой балл» рисовал их вместе с настоящими «Новыми». Теперь:
+
+**Что добавили:**
+- `GET /api/settings` ([dashboard/app/api/settings/route.ts](../dashboard/app/api/settings/route.ts)) — отдаёт `{minScore, minPrice, maxOffers}` из таблицы `settings`. Фоллбэки 7/1000/10 продублированы из [src/config.ts:filter](../src/config.ts) — синхронизировать вручную при смене.
+- На [/](../dashboard/app/page.tsx) добавлен `useQuery(['settings'])`. Дефолт фильтра `minScore` теперь = `settings.minScore` (7), а не «Любой балл». Селект отражает effective-значение; параметр в URL побеждает дефолт. Чтобы посмотреть отсев — выбрать «Любой балл» (URL `?minScore=0`).
+- `GET /api/orders/export` ([dashboard/app/api/orders/export/route.ts](../dashboard/app/api/orders/export/route.ts)) — MD-выгрузка отфильтрованных заказов. Те же query params, что у `/api/orders` (+ `tag`). `take: 1000`. Группировка по `status` (Новые/Откликнулся/Пропущены), формат карточки 1-в-1 как в чате с пользователем (заголовок + ссылка `[host](link)` + источник + цена + дата `Intl.DateTimeFormat('ru-RU')` + score + статус). Заголовки `Content-Disposition: attachment; filename="orders-YYYY-MM-DD.md"` (паттерн как в `/api/metrics/export`).
+- Кнопка «📄 Сохранить в MD» в header главной — рядом с «👤 Профиль» / «📊 Статистика». При сборке href подкладывает effective `minScore`, если в URL его нет, плюс `activeTag`.
+
+**Не трогали:**
+- HH-фильтрация в [src/core/keyword-scorer.ts](../src/core/keyword-scorer.ts) и [src/index.ts](../src/index.ts) — она работает корректно (мусор не уходит в Telegram). Изменения чисто на стороне dashboard.
+- БД-схему — никаких миграций.
+
+**Проверено:**
+- `cd dashboard && npm run lint && npm run build` — зелёные. Новые роуты `/api/settings` и `/api/orders/export` появились в карте маршрутов.
+- UI в браузере не прогонял (CLI-сессия) — глазами проверить после деплоя: дефолт ≥7 на `/`, переключение на «Любой балл» открывает мусор, кнопка скачивает корректный MD.
+
+**Решения:**
+- Дефолт `minScore` поднят до `settings.minScore`, а не убран score=0 на сервере — чтобы поведение фильтра «Любой балл» оставалось буквальным (любой балл = действительно любой). Юзер знает, что при «Любой балл» увидит мусор для аудита и пополнения `hardExclude`.
+- Дефолты в `/api/settings` захардкожены копией из `config.ts`, а не вынесены в shared module — одна константа, не оправдывает абстракции. Документировано в комментарии файла.
+- `take: 1000` в экспорте — потолок при `cleanup(30)` в storage; больше не наберётся без задержки очистки.
+
+---
+
 ## 2026-05-09 (поздняя ночь) — HH-резюме через ручную заливку на /profile
 
 Закрыли «⏳ Открытый трек: HH-резюме под авторизованной сессией». Автопарсинг HH отказался работать под Cloudflare Lux SPA: страница рендерится из `template#HH-Lux-InitialState` (220KB JSON), DOM содержит `data-qa="skill-tag-<numericId>"` (нестабильно к редизайнам). Headful-storageState-вариант собрался частично (см. ниже), но «парсить нестабильный JSON ради ручной заливки раз в полгода» — overkill, поэтому переехали на простую textarea на `/profile`.

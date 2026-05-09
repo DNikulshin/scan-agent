@@ -17,7 +17,7 @@ function PageComponent() {
 
   const status = (searchParams.get('status') ?? 'all') as FilterStatus;
   const source = (searchParams.get('source') ?? 'all') as FilterSource;
-  const minScore = parseInt(searchParams.get('minScore') ?? '0', 10);
+  const minScoreParam = searchParams.get('minScore');
   const activeTag = searchParams.get('tag') ?? '';
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -25,13 +25,30 @@ function PageComponent() {
     skipped: false,
   });
 
+  // Дефолт minScore берём из настроек агента (settings.minScore), чтобы автоматически
+  // отсеянный мусор (score=0 после hardExclude/keyword pre-filter) не светился в «🆕 Новые».
+  // Юзер может опустить через селект — тогда параметр уйдёт в URL и победит дефолт.
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: async () => {
+      const res = await fetch('/api/settings');
+      if (!res.ok) throw new Error(await res.text());
+      return res.json() as Promise<{ minScore: number; minPrice: number; maxOffers: number }>;
+    },
+    staleTime: 60_000,
+  });
+
+  const effectiveMinScore =
+    minScoreParam !== null ? parseInt(minScoreParam, 10) : settings?.minScore ?? 7;
+
   const { data: orders, isLoading, error } = useQuery({
-    queryKey: ['orders', status, source, minScore],
+    queryKey: ['orders', status, source, effectiveMinScore],
+    enabled: minScoreParam !== null || settings !== undefined,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.set('status', status);
       if (source !== 'all') params.set('source', source);
-      if (minScore > 0) params.set('minScore', String(minScore));
+      if (effectiveMinScore > 0) params.set('minScore', String(effectiveMinScore));
       const res = await fetch(`/api/orders?${params}`);
       if (!res.ok) throw new Error(await res.text());
       return res.json() as Promise<Order[]>;
@@ -143,6 +160,19 @@ function PageComponent() {
           </div>
           <div className="shrink-0 flex flex-col sm:flex-row gap-2">
             <a
+              href={(() => {
+                const p = new URLSearchParams(searchParams.toString());
+                if (!p.has('minScore') && effectiveMinScore > 0) {
+                  p.set('minScore', String(effectiveMinScore));
+                }
+                if (activeTag) p.set('tag', activeTag);
+                return `/api/orders/export?${p.toString()}`;
+              })()}
+              className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors text-center"
+            >
+              📄 Сохранить в MD
+            </a>
+            <a
               href="/profile"
               className="px-3 py-1.5 text-sm rounded-md bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition-colors text-center"
             >
@@ -209,7 +239,7 @@ function PageComponent() {
 
         {/* Min score */}
         <select
-          value={minScore || '0'}
+          value={String(effectiveMinScore)}
           onChange={e => updateFilter('minScore', e.target.value === '0' ? 'all' : e.target.value)}
           className="px-3 py-1.5 text-sm bg-gray-900 border border-gray-800 rounded-md text-white"
         >

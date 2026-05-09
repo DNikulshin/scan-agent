@@ -107,6 +107,8 @@ Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные и�
 - `GET/POST/DELETE /api/push-subscriptions` (GET/DELETE — `DASHBOARD_API_KEY`)
 - `GET /api/vapid-public-key`
 - `GET/POST /api/orders`, `POST /api/orders/pitch`
+- `GET /api/orders/export` (MD-выгрузка текущего отфильтрованного списка)
+- `GET /api/settings` (`minScore/minPrice/maxOffers` для UI-дефолтов; источник — таблица `settings`, фоллбэк = `src/config.ts:filter`)
 - `POST /api/profile/refresh` (GitHub снимок), `POST /api/profile/hh` (ручная заливка резюме), `GET /api/profile/export` (MD)
 
 ## Environment Variables
