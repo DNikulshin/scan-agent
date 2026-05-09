@@ -7,6 +7,7 @@ import type {
   FreelanceruProfilePayload,
 } from '@/lib/profile-types';
 import { RefreshButton } from './RefreshButton';
+import { HhUploadForm } from './HhUploadForm';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
@@ -136,7 +137,14 @@ export default async function ProfilePage(): Promise<React.ReactElement> {
         </>
       )}
 
-      {all.hh && <HhSection fetchedAt={all.hh.fetchedAt} payload={all.hh.payload} />}
+      <section className="mb-8">
+        <h2 className="text-lg font-semibold text-white mb-3">HH.ru — резюме (ручная заливка)</h2>
+        <div className="space-y-4">
+          <HhUploadForm />
+          {all.hh && <HhSection fetchedAt={all.hh.fetchedAt} payload={all.hh.payload} />}
+        </div>
+      </section>
+
       {all.fl && <FlSection fetchedAt={all.fl.fetchedAt} payload={all.fl.payload} />}
       {all.kwork && <KworkSection fetchedAt={all.kwork.fetchedAt} payload={all.kwork.payload} />}
       {all.freelanceru && <FreelanceruSection fetchedAt={all.freelanceru.fetchedAt} payload={all.freelanceru.payload} />}
@@ -156,45 +164,68 @@ function SourceHeader({ title, fetchedAt, link }: { title: string; fetchedAt: st
 }
 
 function HhSection({ fetchedAt, payload }: { fetchedAt: string; payload: HhResumePayload }): React.ReactElement {
-  return (
-    <section className="mb-8">
-      <SourceHeader title="HH.ru — резюме" fetchedAt={fetchedAt} link={payload.url} />
+  const experience = payload.experience ?? [];
+  const skills = payload.skills ?? [];
+  const isManual = payload.url === 'manual';
+  const ageHint = (
+    <div className="text-xs text-gray-500">
+      Снимок: {fmtAge(fetchedAt)} ·{' '}
+      {isManual ? 'ручная заливка' : (
+        <a href={payload.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">
+          открыть
+        </a>
+      )}
+    </div>
+  );
+
+  if (payload.rawText) {
+    return (
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-        <div className="text-sm text-gray-300 space-y-1">
-          {payload.title && <div><span className="text-gray-500">Должность:</span> <span className="text-white">{payload.title}</span></div>}
-          {payload.area && <div><span className="text-gray-500">Локация:</span> {payload.area}</div>}
-          {payload.salary && <div><span className="text-gray-500">Желаемая ЗП:</span> {payload.salary}</div>}
-        </div>
-
-        {payload.experience.length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-400 mb-2">Опыт работы</h3>
-            <ul className="space-y-2 text-sm">
-              {payload.experience.map((e, i) => (
-                <li key={`${e.company}-${i}`}>
-                  <div className="text-gray-300">
-                    <span className="text-gray-500 font-mono text-xs">{e.period}</span>{' '}
-                    <span className="text-white">{e.company}</span> · {e.position}
-                  </div>
-                  {e.summary && <div className="text-gray-400 text-xs mt-0.5">{e.summary}</div>}
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {payload.skills.length > 0 && (
-          <div>
-            <h3 className="text-sm font-semibold text-gray-400 mb-2">Ключевые навыки</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {payload.skills.map((s) => (
-                <span key={s} className="px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 border border-gray-700">{s}</span>
-              ))}
-            </div>
-          </div>
-        )}
+        {ageHint}
+        <pre className="text-xs text-gray-300 bg-black/30 rounded p-3 overflow-auto max-h-[480px] whitespace-pre-wrap font-mono">
+          {payload.rawText}
+        </pre>
       </div>
-    </section>
+    );
+  }
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+      {ageHint}
+      <div className="text-sm text-gray-300 space-y-1">
+        {payload.title && <div><span className="text-gray-500">Должность:</span> <span className="text-white">{payload.title}</span></div>}
+        {payload.area && <div><span className="text-gray-500">Локация:</span> {payload.area}</div>}
+        {payload.salary && <div><span className="text-gray-500">Желаемая ЗП:</span> {payload.salary}</div>}
+      </div>
+
+      {experience.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-400 mb-2">Опыт работы</h3>
+          <ul className="space-y-2 text-sm">
+            {experience.map((e, i) => (
+              <li key={`${e.company}-${i}`}>
+                <div className="text-gray-300">
+                  <span className="text-gray-500 font-mono text-xs">{e.period}</span>{' '}
+                  <span className="text-white">{e.company}</span> · {e.position}
+                </div>
+                {e.summary && <div className="text-gray-400 text-xs mt-0.5">{e.summary}</div>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {skills.length > 0 && (
+        <div>
+          <h3 className="text-sm font-semibold text-gray-400 mb-2">Ключевые навыки</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {skills.map((s) => (
+              <span key={s} className="px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-300 border border-gray-700">{s}</span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

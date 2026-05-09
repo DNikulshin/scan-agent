@@ -4,6 +4,47 @@
 
 ---
 
+## 2026-05-09 (поздняя ночь) — HH-резюме через ручную заливку на /profile
+
+Закрыли «⏳ Открытый трек: HH-резюме под авторизованной сессией». Автопарсинг HH отказался работать под Cloudflare Lux SPA: страница рендерится из `template#HH-Lux-InitialState` (220KB JSON), DOM содержит `data-qa="skill-tag-<numericId>"` (нестабильно к редизайнам). Headful-storageState-вариант собрался частично (см. ниже), но «парсить нестабильный JSON ради ручной заливки раз в полгода» — overkill, поэтому переехали на простую textarea на `/profile`.
+
+**Что добавили:**
+- POST [dashboard/app/api/profile/hh/route.ts](../dashboard/app/api/profile/hh/route.ts) — JSON `{text}`, Bearer `DASHBOARD_API_KEY`, лимит 256K. Кладёт в `ProfileSnapshot(source='hh').payload.rawText`.
+- UI [dashboard/app/profile/HhUploadForm.tsx](../dashboard/app/profile/HhUploadForm.tsx) — textarea (10 строк, monospace, счётчик символов) + prompt `DASHBOARD_API_KEY` на сабмите. Встроена в [dashboard/app/profile/page.tsx](../dashboard/app/profile/page.tsx) над `HhSection`.
+- Тип `HhResumePayload` в [src/core/profile/types.ts](../src/core/profile/types.ts) + mirror в [dashboard/lib/profile-types.ts](../dashboard/lib/profile-types.ts) — `rawText?: string` (новое поле приоритетное); legacy-поля стали опциональными.
+- AI-промпт: [src/core/profile-context.ts](../src/core/profile-context.ts) `loadHhExperience()` сначала пробует `rawText` (через `summarizeRawText` в [src/core/profile/hh.ts](../src/core/profile/hh.ts)), fallback на legacy `experience[]`. `getCachedExperienceContext()` контракт без изменений — analyzer ничего не заметит.
+- HhSection ([dashboard/app/profile/page.tsx](../dashboard/app/profile/page.tsx)) рендерит `<pre>` с `rawText` если задан; маркер «ручная заливка» вместо ссылки если `payload.url === 'manual'`. `renderHhSection` ([dashboard/lib/profile.ts](../dashboard/lib/profile.ts)) льёт `rawText` в fenced ` ``` `-block в MD-экспорт.
+
+**Что убрали (cleanup промежуточной storageState-итерации):**
+- Файл `scripts/hh-login.ts` (CLI manual login через headful chromium) — не понадобился.
+- `storageStatePath` опцию из `createBrowser` ([src/parsers/browser.ts](../src/parsers/browser.ts)) и `withStealthPage` ([src/core/profile/browser.ts](../src/core/profile/browser.ts)) — все профильные парсеры снова без сессии.
+- `fetchHhResume()` целиком из [src/core/profile/hh.ts](../src/core/profile/hh.ts) (остался только `summarizeHhExperience` + новая `summarizeRawText`).
+- Env'ы `HH_PLAYWRIGHT_STORAGE_STATE` / `HH_RESUME_PUBLIC_URL`, поля `hhResumeUrl`/`hhStorageStatePath` из `config.profile` ([src/config.ts](../src/config.ts)).
+- HH-job из `refreshAllProfiles` ([src/core/profile/index.ts](../src/core/profile/index.ts)) и шаг `Materialize HH storage state` из [.github/workflows/scan-agent.yml](../.github/workflows/scan-agent.yml).
+- HH-блок из [scripts/smoke-profile.ts](../scripts/smoke-profile.ts).
+
+**End-to-end проверено локально (dashboard dev + Prisma Postgres prod, тест-снимок удалён):**
+- POST без auth → 401, неправильный Bearer → 401, пустой text → 400, не-string → 400.
+- POST 200 с реальным текстом → запись в `profile_snapshots` создана.
+- `/profile` рендерит секцию + `<pre>` + маркер «ручная заливка».
+- `/api/profile/export` MD — `## HH.ru — резюме · ручная заливка` + fenced block.
+- `loadProfileContext()` → `getCachedExperienceContext()` возвращает rawText (536/800 символов).
+- Lint root + dashboard + tsc — все зелёные. Smoke FL/Kwork/Freelance.ru без регрессий.
+
+**Дальше на проде:**
+1. Открыть `/profile` (за Authelia), вставить текст резюме в textarea, ввести `DASHBOARD_API_KEY`.
+2. Перезагрузить — увидеть `<pre>` с текстом + маркер «Снимок: <время> · ручная заливка».
+3. На следующем cron'е агент подхватит rawText в AI-промпт автоматически.
+4. Обновлять снимок раз в N месяцев — заливка перезаписывает прошлый, housekeeping чистит >90д.
+
+**Решения:**
+- Plain text через textarea > PDF/DOCX/файл — пользователь сам формирует выжимку, никаких новых dep'ов в dashboard.
+- Без zod — `{text:string}` валидируется руками, паттерн как у `/api/orders/pitch`.
+- Без структурированной формы (`experience[]` repeater) — overkill для заливки раз в полгода.
+- `url: 'manual'` — маркер ручного снимка для UI/MD-экспорта.
+
+---
+
 ## 2026-05-09 (ночь) — Селекторы FL/Kwork/Freelance.ru закрыты по spec'у пользователя
 
 Spec из `test.md` верифицирован живым smoke (`scripts/smoke-profile.ts`) на профилях `dnikulshin*`. Парсеры теперь возвращают валидные данные. HH вынесен в отдельный трек.

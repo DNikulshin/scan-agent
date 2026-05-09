@@ -2,7 +2,7 @@ import { ProfileSource } from '@prisma/client';
 import { prisma } from './prisma';
 import { profile } from '../profile';
 import { fetchGithubProfile, type GithubSnapshotInput, type RepoSnapshot } from './github-profile';
-import { summarizeHhExperience } from './profile/hh';
+import { summarizeHhExperience, summarizeRawText } from './profile/hh';
 import type { HhResumePayload } from './profile/types';
 import { logger } from '../utils/logger';
 
@@ -56,9 +56,17 @@ async function loadHhExperience(): Promise<string | null> {
   });
   if (!row) return null;
   const payload = row.payload as unknown as HhResumePayload | null;
-  if (!payload || !payload.experience || payload.experience.length === 0) return null;
-  const text = summarizeHhExperience(payload.experience);
-  return text || null;
+  if (!payload) return null;
+  // Приоритет: rawText (ручная заливка через /profile) → legacy structured experience[].
+  if (payload.rawText && payload.rawText.trim().length > 0) {
+    const text = summarizeRawText(payload.rawText);
+    return text || null;
+  }
+  if (payload.experience && payload.experience.length > 0) {
+    const text = summarizeHhExperience(payload.experience);
+    return text || null;
+  }
+  return null;
 }
 
 async function saveSnapshot(input: GithubSnapshotInput): Promise<SnapshotShape> {

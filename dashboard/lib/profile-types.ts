@@ -9,11 +9,13 @@ export interface HhExperienceItem {
 }
 export interface HhResumePayload {
   url: string;
-  title: string;
-  area: string;
-  salary: string;
-  experience: HhExperienceItem[];
-  skills: string[];
+  /** Сырой текст резюме (ручная заливка через /profile). Основной источник для новых снимков. */
+  rawText?: string;
+  title?: string;
+  area?: string;
+  salary?: string;
+  experience?: HhExperienceItem[];
+  skills?: string[];
 }
 
 export interface FlPortfolioItem {

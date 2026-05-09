@@ -52,12 +52,11 @@ async function run(): Promise<void> {
     login: config.github.login,
     token: config.github.token,
   });
-  // Profile (FL/Kwork/HH/Freelance.ru) — параллельно, best-effort.
-  // Только HH-experience попадает в AI-промпт; остальные — для /profile UI.
+  // Profile (FL/Kwork/Freelance.ru) — параллельно, best-effort.
+  // HH заливается вручную через /profile, см. POST /api/profile/hh.
   await refreshAllProfiles({
     flUrl: config.profile.flUrl,
     kworkUrl: config.profile.kworkUrl,
-    hhUrl: config.profile.hhResumeUrl,
     freelanceruUrl: config.profile.freelanceruUrl,
     maxAgeHours: config.profile.snapshotMaxAgeHours,
   });

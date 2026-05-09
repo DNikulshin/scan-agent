@@ -13,17 +13,20 @@ export interface HhExperienceItem {
 }
 
 export interface HhResumePayload {
+  /** Источник: 'manual' для ручной заливки через /profile, либо URL hh.ru/resume/<hash> у legacy-снимков. */
   url: string;
-  /** Имя/титул резюме («Fullstack-разработчик»). */
-  title: string;
-  /** Город / регион — может быть пустой. */
-  area: string;
-  /** Желаемая зарплата как написано в резюме. */
-  salary: string;
-  /** Хронология опыта: новые сверху. */
-  experience: HhExperienceItem[];
-  /** Список ключевых навыков из блока «Ключевые навыки». */
-  skills: string[];
+  /** Сырой текст резюме, скопированный пользователем в textarea. Основной источник для новых снимков. */
+  rawText?: string;
+  /** Имя/титул резюме (legacy, для авто-парсинга). */
+  title?: string;
+  /** Город / регион (legacy). */
+  area?: string;
+  /** Желаемая зарплата (legacy). */
+  salary?: string;
+  /** Хронология опыта (legacy, у ручных снимков пустой). */
+  experience?: HhExperienceItem[];
+  /** Ключевые навыки (legacy). */
+  skills?: string[];
 }
 
 export interface FlPortfolioItem {

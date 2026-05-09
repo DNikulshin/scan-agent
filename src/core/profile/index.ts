@@ -1,7 +1,6 @@
 import { ProfileSource } from '@prisma/client';
 import { prisma } from '../prisma';
 import { logger } from '../../utils/logger';
-import { fetchHhResume } from './hh';
 import { fetchFlProfile } from './fl';
 import { fetchKworkProfile } from './kwork';
 import { fetchFreelanceruProfile } from './freelanceru';
@@ -10,7 +9,6 @@ import type { ProfileSnapshotInput, ProfileSourceKey } from './types';
 export interface RefreshProfilesOpts {
   flUrl: string;
   kworkUrl: string;
-  hhUrl: string;
   freelanceruUrl: string;
   /** Не перепарсивать снимок, если он моложе этого возраста. */
   maxAgeHours: number;
@@ -46,12 +44,14 @@ async function saveSnapshot(input: ProfileSnapshotInput): Promise<void> {
 }
 
 /**
- * Обходит все доступные источники профиля (FL/Kwork/HH/Freelance.ru) и сохраняет
+ * Обходит доступные источники профиля (FL/Kwork/Freelance.ru) и сохраняет
  * новый ProfileSnapshot, если последний свежий снимок старше maxAgeHours
  * либо отсутствует. Источник пропускается если URL пустой.
  *
  * GitHub-снимок в этом фасаде НЕ обновляется — он живёт отдельно
  * через `refreshProfileIfStale` в profile-context.ts (исторический трек Блока 2).
+ * HH-снимок заливается вручную через `/profile` (POST /api/profile/hh) —
+ * автоматический парсинг отказался работать под Cloudflare Lux SPA.
  *
  * Ошибка одного источника не валит остальные (Promise.allSettled).
  */
@@ -59,7 +59,6 @@ export async function refreshAllProfiles(opts: RefreshProfilesOpts): Promise<voi
   const maxAgeMs = opts.maxAgeHours * 3600_000;
 
   const jobs: SourceJob[] = [];
-  if (opts.hhUrl) jobs.push({ source: 'hh', url: opts.hhUrl, fetch: () => fetchHhResume(opts.hhUrl) });
   if (opts.flUrl) jobs.push({ source: 'fl', url: opts.flUrl, fetch: () => fetchFlProfile(opts.flUrl) });
   if (opts.kworkUrl)
     jobs.push({ source: 'kwork', url: opts.kworkUrl, fetch: () => fetchKworkProfile(opts.kworkUrl) });

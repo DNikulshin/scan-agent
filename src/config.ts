@@ -227,13 +227,12 @@ export const config = {
     snapshotMaxAgeHours: Number(process.env.GH_PROFILE_MAX_AGE_HOURS ?? "24"),
   },
 
-  /** Profile snapshots: FL.ru / Kwork / HH-резюме / Freelance.ru (Блок 2 расширение).
-   *  Все URL'ы опциональны — если пустой, парсер пропускается. HH ждёт public share-link
-   *  (формат hh.ru/resume/<hash>), а не приватный URL аккаунта. */
+  /** Profile snapshots: FL.ru / Kwork / Freelance.ru (Блок 2 расширение).
+   *  HH-резюме заливается вручную через dashboard `/profile` (Cloudflare Lux SPA
+   *  не поддаётся автопарсингу). Все URL'ы опциональны — если пустой, парсер пропускается. */
   profile: {
     flUrl: process.env.FL_PROFILE_URL ?? "",
     kworkUrl: process.env.KWORK_PROFILE_URL ?? "",
-    hhResumeUrl: process.env.HH_RESUME_PUBLIC_URL ?? "",
     freelanceruUrl: process.env.FREELANCERU_PROFILE_URL ?? "",
     snapshotMaxAgeHours: Number(process.env.PROFILE_SNAPSHOT_MAX_AGE_HOURS ?? "24"),
   },

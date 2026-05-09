@@ -148,25 +148,37 @@ function renderHhSection(snap: SourceSnapshot<HhResumePayload>): string[] {
   const lines: string[] = [];
   lines.push(`## HH.ru — резюме`);
   lines.push('');
-  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · [открыть резюме](${p.url})`);
+  const sourceLabel = p.url === 'manual' ? 'ручная заливка' : `[открыть резюме](${p.url})`;
+  lines.push(`Снимок: ${fmtDate(snap.fetchedAt)} UTC · ${sourceLabel}`);
   lines.push('');
+
+  if (p.rawText) {
+    lines.push('```');
+    lines.push(p.rawText);
+    lines.push('```');
+    lines.push('');
+    return lines;
+  }
+
   if (p.title) lines.push(`**Должность:** ${p.title}`);
   if (p.area) lines.push(`**Локация:** ${p.area}`);
   if (p.salary) lines.push(`**Желаемая зарплата:** ${p.salary}`);
   lines.push('');
-  if (p.experience.length > 0) {
+  const experience = p.experience ?? [];
+  if (experience.length > 0) {
     lines.push('### Опыт работы');
     lines.push('');
-    for (const e of p.experience) {
+    for (const e of experience) {
       lines.push(`- **${e.period}** — ${e.company} · ${e.position}`);
       if (e.summary) lines.push(`  > ${e.summary}`);
     }
     lines.push('');
   }
-  if (p.skills.length > 0) {
+  const skills = p.skills ?? [];
+  if (skills.length > 0) {
     lines.push('### Ключевые навыки');
     lines.push('');
-    lines.push(p.skills.join(', '));
+    lines.push(skills.join(', '));
     lines.push('');
   }
   return lines;
