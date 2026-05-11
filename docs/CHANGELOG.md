@@ -4,6 +4,22 @@
 
 ---
 
+## 2026-05-11 — Мусор → status='skipped', дефолт фильтра «Любой балл»
+
+Откат костыля из `558dc5f` (см. ниже). Дефолт `minScore=7` на главной заодно прятал легитимные заказы 5–6/10 на вкладке «Все» — корень был не в UI, а в том, что мусор писался в БД со `status='new'`.
+
+**Что сделали:**
+- [`Storage.markProcessed`](../src/core/storage.ts) принимает опциональный `status: 'new' | 'skipped'` (по умолчанию — Prisma-default `'new'`).
+- 4 мусорные ветки в [src/index.ts](../src/index.ts) пишут `status: 'skipped'`: filter trash (`getTrashReason`), HH keyword pre-filter (`hardExclude`/`minKeywordScore`), HH AI low-score (`< settings.minScore`), FL AI low-score.
+- На [/](../dashboard/app/page.tsx) дефолт `effectiveMinScore = 0` («Любой балл»). `useQuery(['settings'])` выпилен — больше не нужен для дефолта. `/api/settings` остаётся (используется в `/stats` / Telegram-боте через `Storage.getSettings`).
+- Бэкфилл прода (через `prisma.order.updateMany`): 15 строк `score=0 AND status='new'` (1 fl + 3 hh + 11 kwork) переведены в `skipped`.
+
+**Инвариант (важно для будущих правок pipeline):** если добавляешь новую ветку «пропустили без `enqueueNotifications`» в [src/index.ts](../src/index.ts) — обязательно ставь `status: 'skipped'` в `markProcessed`, иначе мусор всплывёт в секции «🆕 Новые».
+
+**Проверено:** `npm run lint` (root + dashboard) зелёные. Коммит `d5a4c2e`.
+
+---
+
 ## 2026-05-09 (вечер) — Скрыть HH-мусор на главной + MD-экспорт заказов
 
 Долго раздражало: dashboard показывал в секции «🆕 Новые» HH-вакансии со score=0 (Аналитик 1С, Lua программист и т.п.). В Telegram они корректно не уходили — pre-filter в [src/index.ts](../src/index.ts) ловит их через `hardExclude`/`minKeywordScore` и помечает `score: 0` без `enqueueNotifications`. Но `markProcessed` пишет их в БД для дедупа со `status: 'new'`, и фронт по дефолту с фильтром «Любой балл» рисовал их вместе с настоящими «Новыми». Теперь:

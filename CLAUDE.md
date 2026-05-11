@@ -108,7 +108,7 @@ Next.js 16 App Router + React 19 + Tailwind 4 + TanStack Query. Данные и�
 - `GET /api/vapid-public-key`
 - `GET/POST /api/orders`, `POST /api/orders/pitch`
 - `GET /api/orders/export` (MD-выгрузка текущего отфильтрованного списка)
-- `GET /api/settings` (`minScore/minPrice/maxOffers` для UI-дефолтов; источник — таблица `settings`, фоллбэк = `src/config.ts:filter`)
+- `GET /api/settings` (`minScore/minPrice/maxOffers`; источник — таблица `settings`, фоллбэк = `src/config.ts:filter`). Используется на `/stats` и Telegram-ботом; главная `/` с 2026-05-11 от него не зависит (дефолт фильтра minScore = 0, мусор отсекается на бэке через `status='skipped'` в `markProcessed`)
 - `POST /api/profile/refresh` (GitHub снимок), `POST /api/profile/hh` (ручная заливка резюме), `GET /api/profile/export` (MD)
 
 ## Environment Variables
