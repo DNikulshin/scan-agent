@@ -105,6 +105,7 @@ async function run(): Promise<void> {
             title: order.title,
             score: 0,
             link: order.link,
+            status: 'skipped',
           });
           continue;
         }
@@ -139,6 +140,7 @@ async function run(): Promise<void> {
               title: order.title,
               score: 0,
               link: order.link,
+              status: 'skipped',
             });
             continue;
           }
@@ -164,6 +166,7 @@ async function run(): Promise<void> {
               title: order.title,
               score: score.score,
               link: order.link,
+              status: 'skipped',
             });
             continue;
           }
@@ -198,6 +201,7 @@ async function run(): Promise<void> {
               title: order.title,
               score: score.score,
               link: order.link,
+              status: 'skipped',
             });
             continue;
           }

@@ -81,6 +81,7 @@ export class Storage {
     pitch?: string;
     pitchB?: string;
     tags?: string[];
+    status?: 'new' | 'skipped';
   }): Promise<void> {
     const data = {
       title: params.title,
@@ -90,6 +91,7 @@ export class Storage {
       pitchB: params.pitchB ?? '',
       tags: (params.tags ?? []).join(','),
       processedAt: new Date(),
+      ...(params.status ? { status: params.status } : {}),
     };
     await this.prisma.order.upsert({
       where: { orderId_source: { orderId: params.orderId, source: params.source } },

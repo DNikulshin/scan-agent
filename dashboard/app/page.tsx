@@ -25,25 +25,13 @@ function PageComponent() {
     skipped: false,
   });
 
-  // Дефолт minScore берём из настроек агента (settings.minScore), чтобы автоматически
-  // отсеянный мусор (score=0 после hardExclude/keyword pre-filter) не светился в «🆕 Новые».
-  // Юзер может опустить через селект — тогда параметр уйдёт в URL и победит дефолт.
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: async () => {
-      const res = await fetch('/api/settings');
-      if (!res.ok) throw new Error(await res.text());
-      return res.json() as Promise<{ minScore: number; minPrice: number; maxOffers: number }>;
-    },
-    staleTime: 60_000,
-  });
-
-  const effectiveMinScore =
-    minScoreParam !== null ? parseInt(minScoreParam, 10) : settings?.minScore ?? 7;
+  // Дефолт «Любой балл» (0). Мусор (HH hardExclude / keyword / low-score AI) пишется
+  // в БД сразу со status='skipped' — см. src/index.ts markProcessed(...status:'skipped'),
+  // поэтому в секции «🆕 Новые» он не светится без доп. фильтра.
+  const effectiveMinScore = minScoreParam !== null ? parseInt(minScoreParam, 10) : 0;
 
   const { data: orders, isLoading, error } = useQuery({
     queryKey: ['orders', status, source, effectiveMinScore],
-    enabled: minScoreParam !== null || settings !== undefined,
     queryFn: async () => {
       const params = new URLSearchParams();
       if (status !== 'all') params.set('status', status);
