@@ -24,13 +24,13 @@ jobs:
           node-version: "20"
           cache: "npm"
 
-      - name: Restore DB cache
-        uses: actions/cache/restore@v4
-        with:
-          path: agent.db
-          key: agent-db-${{ github.run_id }}
-          restore-keys: |
-            agent-db-
+      # - name: Restore DB cache
+      #   uses: actions/cache/restore@v4
+      #   with:
+      #     path: agent.db
+      #     key: agent-db-${{ github.run_id }}
+      #     restore-keys: |
+      #       agent-db-
 
       - name: Install dependencies
         run: npm ci
@@ -90,18 +90,18 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: npx tsx src/index.ts
 
-      - name: Upload agent.db for analysis
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: agent-db-snapshot
-          path: agent.db
-          retention-days: 7
-          if-no-files-found: warn
+      # - name: Upload agent.db for analysis
+      #   if: always()
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: agent-db-snapshot
+      #     path: agent.db
+      #     retention-days: 7
+      #     if-no-files-found: warn
 
-      - name: Save DB cache
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: agent.db
-          key: agent-db-${{ github.run_id }}
+      # - name: Save DB cache
+      #   if: always()
+      #   uses: actions/cache/save@v4
+      #   with:
+      #     path: agent.db
+      #     key: agent-db-${{ github.run_id }}
