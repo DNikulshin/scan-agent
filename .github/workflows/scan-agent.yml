@@ -35,6 +35,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Force regenerate Prisma Client
+        run: |
+          rm -rf node_modules/.prisma
+          npx prisma generate
+
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
 
@@ -47,8 +52,8 @@ jobs:
           # ── FL.ru ──
           FL_ENABLED: ${{ secrets.FL_ENABLED }}
           FL_SEARCH_URL: ${{ secrets.FL_SEARCH_URL }}
-          FL_GENERATE_PITCH: "false"   # отклики пишем вручную
-          FL_MAX_PAGES: "5"            # ограничение минут Actions
+          FL_GENERATE_PITCH: "false" # отклики пишем вручную
+          FL_MAX_PAGES: "5" # ограничение минут Actions
           FL_ONLY_FREE_RESPONSES: ${{ secrets.FL_ONLY_FREE_RESPONSES }}
           # ── Freelance.ru ──
           FREELANCERU_ENABLED: ${{ secrets.FREELANCERU_ENABLED }}
