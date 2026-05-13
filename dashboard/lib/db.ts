@@ -40,6 +40,7 @@ export interface Order {
   created_at: string;
   processed_at: string;
   reminded_at: string | null;
+  published_at: string | null;
   blacklisted: boolean;
 }
 
@@ -67,6 +68,7 @@ export function serializeOrder(o: PrismaOrder): Order {
     created_at: o.createdAt.toISOString(),
     processed_at: o.processedAt.toISOString(),
     reminded_at: o.remindedAt ? o.remindedAt.toISOString() : null,
+    published_at: o.publishedAt ? o.publishedAt.toISOString() : null,
     blacklisted: o.blacklisted,
   };
 }

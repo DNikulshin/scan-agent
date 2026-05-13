@@ -72,8 +72,12 @@ export function OrderCard({ order, onStatusUpdate, onOutcomeUpdate }: {
             )}
             <span>·</span>
             <span>{(() => {
+              const fmt = (raw: string) =>
+                new Date(raw).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
               try {
-                return new Date(order.created_at).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                return order.published_at
+                  ? `📅 опубл. ${fmt(order.published_at)}`
+                  : fmt(order.created_at);
               } catch {
                 return 'Дата неизвестна';
               }

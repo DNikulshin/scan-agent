@@ -46,7 +46,8 @@ function renderOrder(o: PrismaOrder): string {
   const link = o.link || '';
   const linkText = link ? `[${host(link)}](${link})` : '—';
   const price = o.price?.trim() || 'не указана';
-  const date = dateFmt.format(o.createdAt);
+  const dateLabel = o.publishedAt ? 'Опубликован' : 'Дата';
+  const dateValue = dateFmt.format(o.publishedAt ?? o.createdAt);
   const statusRu = STATUS_LABEL[o.status] ?? o.status;
 
   return [
@@ -54,7 +55,7 @@ function renderOrder(o: PrismaOrder): string {
     `- **Ссылка:** ${linkText}`,
     `- **Источник:** ${o.source}`,
     `- **Зарплата:** ${price}`,
-    `- **Дата:** ${date}`,
+    `- **${dateLabel}:** ${dateValue}`,
     `- **Рейтинг совпадения:** ${o.score}/10`,
     `- **Статус:** ${statusRu}`,
     '',
