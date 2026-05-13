@@ -74,6 +74,11 @@ export const config = {
       price: ".wants-card__price-wrap",
       offersContainer: ".mr8",
     },
+    // Kwork не отдаёт дату публикации в DOM (нет JSON-LD JobPosting, нет <time>,
+    // нет og:* / itemprop=datePublished — проверено 2026-05-13). Единственный
+    // сигнал — счётчик «Осталось», поэтому считаем published ≈ now - (TTL - remaining).
+    // TTL зависит от выбора заказчика (1–7 дней), дефолт — 2 дня (типичное наблюдение).
+    enrichTtlHours: Number(process.env.KWORK_ENRICH_TTL_HOURS ?? "48"),
   },
 
   /** FL.ru */

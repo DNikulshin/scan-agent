@@ -92,6 +92,18 @@ export class Storage {
     city?: string;
     publishedAt?: string; // ISO‑строка
   }): Promise<void> {
+    let publishedAtDate: Date | undefined;
+    if (params.publishedAt) {
+      const d = new Date(params.publishedAt);
+      if (Number.isNaN(d.getTime())) {
+        logger.warn(
+          { raw: params.publishedAt, orderId: params.orderId, source: params.source },
+          "Невалидная publishedAt — игнорируем",
+        );
+      } else {
+        publishedAtDate = d;
+      }
+    }
     const data = {
       title: params.title,
       score: params.score,
@@ -103,9 +115,7 @@ export class Storage {
       ...(params.status ? { status: params.status } : {}),
       ...(params.employer ? { employer: params.employer } : {}),
       ...(params.city ? { city: params.city } : {}),
-      ...(params.publishedAt
-        ? { publishedAt: new Date(params.publishedAt) }
-        : {}),
+      ...(publishedAtDate ? { publishedAt: publishedAtDate } : {}),
     };
     await this.prisma.order.upsert({
       where: {
@@ -270,9 +280,18 @@ export class Storage {
   async getOrdersWithoutPublishedAt(
     limit: number = 20,
   ): Promise<OrderToEnrich[]> {
+    // 7-дневное окно: не зависит от того, что для части заказов дата так и не
+    // вытащится (404, изменилась вёрстка) — иначе они залипают в выборке навсегда
+    // и блокируют enrich остальных. После 7 дней — просто забываем.
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
     const rows = await this.prisma.order.findMany({
-      where: { publishedAt: null },
-      select: { id: true, source: true, link: true, orderId: true },
+      where: {
+        publishedAt: null,
+        processedAt: { gte: cutoff },
+        status: "new",
+        blacklisted: false,
+      },
+      select: { id: true, source: true, link: true },
       orderBy: { processedAt: "desc" },
       take: limit,
     });

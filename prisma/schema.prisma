@@ -28,7 +28,7 @@ model Order {
   tags        String   @default("")
   employer    String?
   city        String?
-  publishedAt  DateTime? @map("published_at")
+  publishedAt  DateTime? @map("published_at") @db.Timestamptz(6)
 
   // new | applied | skipped
   status  String @default("new")

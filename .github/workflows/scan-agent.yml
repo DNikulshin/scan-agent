@@ -40,6 +40,11 @@ jobs:
           rm -rf node_modules/.prisma
           npx prisma generate
 
+      - name: Apply Prisma migrations
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: npx prisma migrate deploy
+
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
 
