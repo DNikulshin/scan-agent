@@ -18,8 +18,6 @@ import {
 } from "./parsers";
 import { calcKeywordScore, FULLSTACK_SCORING } from "./core/keyword-scorer";
 import { TelegramNotifier } from "./notifiers/telegram";
-import { SupabaseNotifier } from "./notifiers/supabase";
-import { DashboardNotifier } from "./notifiers/dashboard";
 import { enqueueNotifications, enqueueReminder } from "./core/notifications";
 import { logger } from "./utils/logger";
 import type { Order, Parser, ScoredOrder } from "./types";
@@ -37,15 +35,9 @@ async function run(): Promise<void> {
   validateConfig();
 
   const storage = new Storage();
-  const supabase = new SupabaseNotifier();
-  const dashboard = new DashboardNotifier();
-  const telegram = new TelegramNotifier(
-    storage,
-    async (orderId, source, hook, pitch) => {
-      await supabase.updatePitch(orderId, source, hook, pitch);
-      await dashboard.updatePitch(orderId, source, hook, pitch);
-    },
-  );
+  // Pitch B выбирается через Storage.choosePitch (см. notifiers/telegram.ts) —
+  // запись идёт напрямую в Prisma, без HTTP/Supabase каналов.
+  const telegram = new TelegramNotifier(storage);
 
   telegram.startCallbackListener();
   await storage.cleanup(30);
@@ -278,25 +270,6 @@ async function run(): Promise<void> {
             "Ошибка enqueue уведомлений (заказ не помечен processed — повторим в следующем прогоне)",
           );
           continue;
-        }
-
-        // Опциональные каналы (HTTP-нотификаторы — будут удалены после Шага 5).
-        try {
-          await supabase.send(scored);
-        } catch (err) {
-          logger.error(
-            { err, orderId: order.id },
-            "Ошибка отправки в Supabase",
-          );
-        }
-
-        try {
-          await dashboard.send(scored);
-        } catch (err) {
-          logger.error(
-            { err, orderId: order.id },
-            "Ошибка отправки в Dashboard",
-          );
         }
 
         await new Promise((r) => setTimeout(r, config.delays.betweenOrders));

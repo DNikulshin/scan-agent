@@ -14,23 +14,14 @@ import {
   esc,
 } from "./telegram-format";
 
-type PitchChoosenCallback = (
-  orderId: string,
-  source: string,
-  hook: string,
-  pitch: string,
-) => Promise<void>;
-
 export class TelegramNotifier implements Notifier {
   name = "telegram";
   private bot: TelegramBot;
   private storage: Storage | null;
-  private onPitchChosen: PitchChoosenCallback | null;
 
-  constructor(storage?: Storage, onPitchChosen?: PitchChoosenCallback) {
+  constructor(storage?: Storage) {
     this.bot = new TelegramBot(config.telegram.botToken, { polling: false });
     this.storage = storage ?? null;
-    this.onPitchChosen = onPitchChosen ?? null;
   }
 
   async send(scored: ScoredOrder): Promise<void> {
@@ -201,20 +192,7 @@ export class TelegramNotifier implements Notifier {
       } else if (action === "pick1" || action === "pick2") {
         try {
           const variant = action === "pick1" ? "a" : "b";
-          const chosen = await this.storage!.choosePitch(
-            orderId,
-            source,
-            variant,
-          );
-
-          if (chosen && this.onPitchChosen) {
-            await this.onPitchChosen(
-              orderId,
-              source,
-              chosen.hook,
-              chosen.pitch,
-            ).catch(() => {});
-          }
+          await this.storage!.choosePitch(orderId, source, variant);
 
           const label = action === "pick1" ? "Вариант 1" : "Вариант 2";
           await this.bot.answerCallbackQuery(query.id, {

@@ -10,9 +10,6 @@
 | `TELEGRAM_BOT_TOKEN` | GHA secret | Telegram-бот |
 | `TELEGRAM_CHAT_ID` | GHA secret | Куда слать уведомления |
 | `DATABASE_URL` | GHA secret | Внешняя строка к `postgres-provision` (открыта только для IP GHA) |
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | GHA secret | Push (validateConfig ещё ссылается, хотя `push.ts` удалён) |
-| `DASHBOARD_URL` / `DASHBOARD_API_KEY` | GHA secret | Параллельный HTTP-нотификатор (legacy, будет удалён) |
-| `SUPABASE_URL` / `SUPABASE_ANON_KEY` | GHA secret | Опционально |
 | `HH_ENABLED` / `HH_SEARCH_URL` / `HH_MAX_PAGES` (def 3) / `HH_MIN_KEYWORD_SCORE` (def 10) | GHA secret | HH-парсер |
 | `FL_ENABLED` / `FL_SEARCH_URL` / `FL_MAX_PAGES` (def 5) / `FL_ONLY_FREE_RESPONSES` / `FL_GENERATE_PITCH` | GHA secret | FL.ru-парсер |
 | `FREELANCERU_ENABLED` / `FREELANCERU_SEARCH_URL` | GHA secret | Freelance.ru-парсер |
@@ -31,8 +28,7 @@
 |---|---|
 | `DATABASE_URL` (= `DASHBOARD_DATABASE_URL`) | Internal URL к `postgres-provision` (pooled) |
 | `DATABASE_URL_DIRECT` (= `DASHBOARD_DATABASE_URL_DIRECT`) | Non-pooled URL для `/api/orders/stream` SSE. Prisma Postgres / pgBouncer ломает LISTEN/NOTIFY, нужна постоянная сессия. Если не задан — fallback на `DATABASE_URL` |
-| `VAPID_PRIVATE_KEY` | Подпись push-payload |
-| `NEXT_PUBLIC_VAPID_PUBLIC_KEY` | Не используется в новой схеме (см. [dashboard-overview.md](dashboard-overview.md)) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Подпись push-payload, отдаются через `GET /api/vapid-public-key` для клиента |
 | `DASHBOARD_API_KEY` | Bearer для приватных API-роутов |
 | `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` | Для notifications worker'а (доставка) |
 | `VAPID_SUBJECT` (def `mailto:admin@example.com`) | Push payload subject |

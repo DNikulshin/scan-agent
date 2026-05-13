@@ -20,18 +20,6 @@ export const config = {
     timeout: 10_000,
   },
 
-  /** Supabase (облако, опционально) */
-  supabase: {
-    url: process.env.SUPABASE_URL ?? "",
-    anonKey: process.env.SUPABASE_ANON_KEY ?? "",
-  },
-
-  /** Dashboard VPS (опционально) */
-  dashboard: {
-    url: process.env.DASHBOARD_URL ?? "",
-    apiKey: process.env.DASHBOARD_API_KEY ?? "",
-  },
-
   /** Фильтрация */
   filter: {
     stopWords: [
@@ -50,12 +38,6 @@ export const config = {
     minPrice: 1_000,
     maxOffers: 10,
     minScore: 7,
-  },
-
-  /** Кэш обработанных ID */
-  cache: {
-    file: process.env.CACHE_FILE ?? "processed_ids.json",
-    maxSize: 500,
   },
 
   /** Задержки */
@@ -242,14 +224,6 @@ export const config = {
     snapshotMaxAgeHours: Number(process.env.PROFILE_SNAPSHOT_MAX_AGE_HOURS ?? "24"),
   },
 
-  /** Push notifications */
-  push: {
-    vapid: {
-      subject: "mailto:your-email@example.com",
-      publicKey: process.env.VAPID_PUBLIC_KEY ?? "",
-      privateKey: process.env.VAPID_PRIVATE_KEY ?? "",
-    },
-  },
 };
 
 /** Валидация конфига при старте */
@@ -258,8 +232,6 @@ export function validateConfig(): void {
   if (!config.openrouter.apiKey) missing.push("OPENROUTER_API_KEY");
   if (!config.telegram.botToken) missing.push("TELEGRAM_BOT_TOKEN");
   if (!config.telegram.chatId) missing.push("TELEGRAM_CHAT_ID");
-  if (!config.push.vapid.publicKey) missing.push("VAPID_PUBLIC_KEY");
-  if (!config.push.vapid.privateKey) missing.push("VAPID_PRIVATE_KEY");
 
   if (missing.length > 0) {
     throw new Error(

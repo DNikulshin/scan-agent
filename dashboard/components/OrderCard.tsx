@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { Order } from '@/lib/supabase';
+import type { Order } from '@/lib/db';
 
 const SOURCE_EMOJI: Record<string, string> = {
   kwork: '🟠',

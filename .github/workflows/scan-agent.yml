@@ -84,15 +84,6 @@ jobs:
           FL_PROFILE_URL: ${{ vars.FL_PROFILE_URL }}
           KWORK_PROFILE_URL: ${{ vars.KWORK_PROFILE_URL }}
           FREELANCERU_PROFILE_URL: ${{ vars.FREELANCERU_PROFILE_URL }}
-          # ── Dashboard / Supabase / Push ──
-          # VAPID_* пока требуются validateConfig (push.ts удалён, но валидация
-          # ещё ссылается на ключи; будет вычищена отдельно).
-          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
-          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
-          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
-          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: npx tsx src/index.ts
 
       # - name: Upload agent.db for analysis
