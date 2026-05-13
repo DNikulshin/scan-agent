@@ -23,6 +23,7 @@ import { DashboardNotifier } from "./notifiers/dashboard";
 import { enqueueNotifications, enqueueReminder } from "./core/notifications";
 import { logger } from "./utils/logger";
 import type { Order, Parser, ScoredOrder } from "./types";
+import { enrichOrders } from "./enrich";
 
 const parsers: Parser[] = [
   new KworkParser(),
@@ -328,6 +329,13 @@ async function run(): Promise<void> {
     logger.info({ totalNew, totalEnqueued, dbSize }, "Цикл завершён");
 
     await metrics.flush();
+
+    // Обогащение датами публикации (enrich worker)
+    try {
+      await enrichOrders(storage, 20);
+    } catch (err) {
+      logger.error({ err }, "Ошибка enrich-воркера");
+    }
 
     if (!process.env.KEEP_ALIVE) {
       setTimeout(async () => {

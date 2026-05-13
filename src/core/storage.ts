@@ -42,6 +42,12 @@ interface StatsRow {
   total_count: bigint | null;
 }
 
+export interface OrderToEnrich {
+  id: string;
+  source: string;
+  link: string;
+}
+
 const num = (v: bigint | null | undefined): number => Number(v ?? 0n);
 
 /**
@@ -259,6 +265,25 @@ export class Storage {
       logger.info({ deleted: result.count, daysOld }, "Очищены старые записи");
     }
     return result.count;
+  }
+
+  async getOrdersWithoutPublishedAt(
+    limit: number = 20,
+  ): Promise<OrderToEnrich[]> {
+    const rows = await this.prisma.order.findMany({
+      where: { publishedAt: null },
+      select: { id: true, source: true, link: true, orderId: true },
+      orderBy: { processedAt: "desc" },
+      take: limit,
+    });
+    return rows.map((r) => ({ id: r.id, source: r.source, link: r.link }));
+  }
+
+  async setPublishedAt(id: string, publishedAt: Date): Promise<void> {
+    await this.prisma.order.update({
+      where: { id },
+      data: { publishedAt },
+    });
   }
 
   async close(): Promise<void> {
