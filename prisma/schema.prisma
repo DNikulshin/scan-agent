@@ -28,6 +28,7 @@ model Order {
   tags        String   @default("")
   employer    String?
   city        String?
+  publishedAt  DateTime? @map("published_at")
 
   // new | applied | skipped
   status  String @default("new")
