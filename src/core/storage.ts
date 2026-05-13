@@ -1,8 +1,8 @@
-import { Prisma, PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from "@prisma/client";
 
-import { config } from '../config';
-import { logger } from '../utils/logger';
-import { prisma as defaultPrisma } from './prisma';
+import { config } from "../config";
+import { logger } from "../utils/logger";
+import { prisma as defaultPrisma } from "./prisma";
 
 export interface DynamicSettings {
   minPrice: number;
@@ -53,7 +53,7 @@ export class Storage {
 
   constructor(prisma?: PrismaClient) {
     this.prisma = prisma ?? defaultPrisma;
-    logger.info('Prisma Postgres хранилище инициализировано');
+    logger.info("Prisma Postgres хранилище инициализировано");
   }
 
   async isProcessed(orderId: string, source: string): Promise<boolean> {
@@ -81,20 +81,30 @@ export class Storage {
     pitch?: string;
     pitchB?: string;
     tags?: string[];
-    status?: 'new' | 'skipped';
+    status?: "new" | "skipped";
+    employer?: string;
+    city?: string;
+    publishedAt?: string; // ISO‑строка
   }): Promise<void> {
     const data = {
       title: params.title,
       score: params.score,
       link: params.link,
-      pitch: params.pitch ?? '',
-      pitchB: params.pitchB ?? '',
-      tags: (params.tags ?? []).join(','),
+      pitch: params.pitch ?? "",
+      pitchB: params.pitchB ?? "",
+      tags: (params.tags ?? []).join(","),
       processedAt: new Date(),
       ...(params.status ? { status: params.status } : {}),
+      ...(params.employer ? { employer: params.employer } : {}),
+      ...(params.city ? { city: params.city } : {}),
+      ...(params.publishedAt
+        ? { publishedAt: new Date(params.publishedAt) }
+        : {}),
     };
     await this.prisma.order.upsert({
-      where: { orderId_source: { orderId: params.orderId, source: params.source } },
+      where: {
+        orderId_source: { orderId: params.orderId, source: params.source },
+      },
       create: { orderId: params.orderId, source: params.source, ...data },
       update: data,
     });
@@ -105,7 +115,7 @@ export class Storage {
       where: { orderId_source: { orderId, source } },
       select: { pitch: true },
     });
-    return row?.pitch ?? '';
+    return row?.pitch ?? "";
   }
 
   async blacklist(orderId: string, source: string): Promise<void> {
@@ -114,17 +124,25 @@ export class Storage {
       create: { orderId, source, blacklisted: true, processedAt: new Date() },
       update: { blacklisted: true },
     });
-    logger.info({ orderId, source }, 'Заказ добавлен в blacklist');
+    logger.info({ orderId, source }, "Заказ добавлен в blacklist");
   }
 
   async getSettings(): Promise<DynamicSettings> {
     const rows = await this.prisma.setting.findMany();
     const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
     return {
-      minPrice: map['minPrice'] ? parseInt(map['minPrice'], 10) : config.filter.minPrice,
-      minScore: map['minScore'] ? parseInt(map['minScore'], 10) : config.filter.minScore,
-      maxOffers: map['maxOffers'] ? parseInt(map['maxOffers'], 10) : config.filter.maxOffers,
-      stopWords: map['stopWords'] ? JSON.parse(map['stopWords']) : [...config.filter.stopWords],
+      minPrice: map["minPrice"]
+        ? parseInt(map["minPrice"], 10)
+        : config.filter.minPrice,
+      minScore: map["minScore"]
+        ? parseInt(map["minScore"], 10)
+        : config.filter.minScore,
+      maxOffers: map["maxOffers"]
+        ? parseInt(map["maxOffers"], 10)
+        : config.filter.maxOffers,
+      stopWords: map["stopWords"]
+        ? JSON.parse(map["stopWords"])
+        : [...config.filter.stopWords],
     };
   }
 
@@ -134,15 +152,15 @@ export class Storage {
       create: { key, value },
       update: { value },
     });
-    logger.info({ key, value }, 'Настройка обновлена');
+    logger.info({ key, value }, "Настройка обновлена");
   }
 
   async choosePitch(
     orderId: string,
     source: string,
-    variant: 'a' | 'b',
+    variant: "a" | "b",
   ): Promise<{ hook: string; pitch: string } | null> {
-    if (variant === 'a') return null;
+    if (variant === "a") return null;
 
     const row = await this.prisma.order.findUnique({
       where: { orderId_source: { orderId, source } },
@@ -156,14 +174,17 @@ export class Storage {
         where: { orderId_source: { orderId, source } },
         data: { pitch: `${parsed.hook}\n\n${parsed.pitch}` },
       });
-      logger.info({ orderId, source }, 'Выбран вариант B');
+      logger.info({ orderId, source }, "Выбран вариант B");
       return parsed;
     } catch {
       return null;
     }
   }
 
-  async getUnremindedOrders(minScore: number, afterHours: number = 2): Promise<ReminderOrder[]> {
+  async getUnremindedOrders(
+    minScore: number,
+    afterHours: number = 2,
+  ): Promise<ReminderOrder[]> {
     const cutoff = new Date(Date.now() - afterHours * 60 * 60 * 1000);
     const rows = await this.prisma.order.findMany({
       where: {
@@ -172,7 +193,14 @@ export class Storage {
         remindedAt: null,
         processedAt: { lte: cutoff },
       },
-      select: { orderId: true, source: true, title: true, link: true, score: true, pitch: true },
+      select: {
+        orderId: true,
+        source: true,
+        title: true,
+        link: true,
+        score: true,
+        pitch: true,
+      },
     });
     return rows.map((r) => ({
       order_id: r.orderId,
@@ -212,7 +240,8 @@ export class Storage {
       week_total: num(r.week_total),
       week_sent: num(r.week_sent),
       week_skipped: num(r.week_skipped),
-      week_avg_score: r.week_avg_score === null ? null : Number(r.week_avg_score),
+      week_avg_score:
+        r.week_avg_score === null ? null : Number(r.week_avg_score),
       total_count: num(r.total_count),
     };
   }
@@ -227,7 +256,7 @@ export class Storage {
       where: { processedAt: { lt: cutoff } },
     });
     if (result.count > 0) {
-      logger.info({ deleted: result.count, daysOld }, 'Очищены старые записи');
+      logger.info({ deleted: result.count, daysOld }, "Очищены старые записи");
     }
     return result.count;
   }

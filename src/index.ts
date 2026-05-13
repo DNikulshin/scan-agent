@@ -4,7 +4,10 @@ import { getTrashReason } from "./core/filter";
 import { analyzeOrder, scoreOrder } from "./core/analyzer";
 import { extractTags } from "./core/tagger";
 import { RunMetrics } from "./core/metrics";
-import { refreshProfileIfStale, loadProfileContext } from "./core/profile-context";
+import {
+  refreshProfileIfStale,
+  loadProfileContext,
+} from "./core/profile-context";
 import { refreshAllProfiles, cleanupProfileSnapshots } from "./core/profile";
 import {
   KworkParser,
@@ -105,7 +108,10 @@ async function run(): Promise<void> {
             title: order.title,
             score: 0,
             link: order.link,
-            status: 'skipped',
+            status: "skipped",
+            employer: order.meta?.employer,
+            city: order.meta?.city,
+            publishedAt: order.meta?.publishedAt,
           });
           continue;
         }
@@ -140,7 +146,10 @@ async function run(): Promise<void> {
               title: order.title,
               score: 0,
               link: order.link,
-              status: 'skipped',
+              status: "skipped",
+              employer: order.meta?.employer,
+              city: order.meta?.city,
+              publishedAt: order.meta?.publishedAt,
             });
             continue;
           }
@@ -166,7 +175,10 @@ async function run(): Promise<void> {
               title: order.title,
               score: score.score,
               link: order.link,
-              status: 'skipped',
+              status: "skipped",
+              employer: order.meta?.employer,
+              city: order.meta?.city,
+              publishedAt: order.meta?.publishedAt,
             });
             continue;
           }
@@ -201,7 +213,7 @@ async function run(): Promise<void> {
               title: order.title,
               score: score.score,
               link: order.link,
-              status: 'skipped',
+              status: "skipped",
             });
             continue;
           }
@@ -251,6 +263,9 @@ async function run(): Promise<void> {
               : "",
             pitchB: scored.pitchB ? JSON.stringify(scored.pitchB) : undefined,
             tags: scored.tags,
+            employer: order.meta?.employer,
+            city: order.meta?.city,
+            publishedAt: order.meta?.publishedAt,
           });
           await enqueueNotifications(scored);
           totalEnqueued++;
@@ -287,7 +302,10 @@ async function run(): Promise<void> {
       }
     }
   } finally {
-    const unreminded = await storage.getUnremindedOrders(config.filter.minScore, 2);
+    const unreminded = await storage.getUnremindedOrders(
+      config.filter.minScore,
+      2,
+    );
     for (const order of unreminded) {
       try {
         await enqueueReminder(order);
@@ -300,14 +318,14 @@ async function run(): Promise<void> {
       }
     }
     if (unreminded.length > 0) {
-      logger.info({ count: unreminded.length }, "Напоминания поставлены в outbox");
+      logger.info(
+        { count: unreminded.length },
+        "Напоминания поставлены в outbox",
+      );
     }
 
     const dbSize = await storage.count();
-    logger.info(
-      { totalNew, totalEnqueued, dbSize },
-      "Цикл завершён",
-    );
+    logger.info({ totalNew, totalEnqueued, dbSize }, "Цикл завершён");
 
     await metrics.flush();
 

@@ -8,18 +8,19 @@ export interface Order {
   price: string;
   link: string;
   offersCount: number;
-  source: 'kwork' | 'fl' | 'freelanceru' | 'habr' | 'hh';
+  source: "kwork" | "fl" | "freelanceru" | "habr" | "hh";
   /** HH-специфичные поля для отображения в Telegram */
   meta?: {
     employer?: string;
     city?: string;
+    publishedAt?: string;
   };
 }
 
 /** Результат AI-скоринга */
 export interface ScoreResult {
-  score: number;   // 0–10
-  reason: string;  // почему такая оценка
+  score: number; // 0–10
+  reason: string; // почему такая оценка
 }
 
 /** Расход OpenRouter за один (или суммарно несколько) вызов(а). */
@@ -31,8 +32,8 @@ export interface AiUsage {
 
 /** Результат генерации pitch */
 export interface PitchResult {
-  hook: string;    // первая цепляющая фраза
-  pitch: string;   // полный отклик
+  hook: string; // первая цепляющая фраза
+  pitch: string; // полный отклик
 }
 
 /** Заказ, прошедший полный анализ */
