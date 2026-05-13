@@ -4,6 +4,46 @@
 
 ---
 
+## 2026-05-13 — Облачное управление БД + enrich-воркер `publishedAt` + ревью
+
+Два больших пакета изменений в одной сессии.
+
+**Инфра — облачное управление БД** (вне репо):
+- Развёрнут `postgres-provision` (PostgreSQL 16) как центральная БД для всех проектов; `db-provisioner` (FastAPI) + `db-ui` (nginx) на `db.nikulshin-dev.online` за Authelia; Caddy проксирует `/api/*` на provisioner с инжектом `X-API-Key`. Бэкапы — `pg_dumpall` → MinIO бакет `db-backups` (cron 03:00 МСК, ротация 7 дней).
+- scan-agent переехал на собственную БД `db_scan_agent`. Dashboard — internal string `postgresql://...@postgres-provision:5432/...` через `DASHBOARD_DATABASE_URL*`. Агент в GHA — внешняя строка из секрета `DATABASE_URL`. Из workflow убраны SQLite cache-шаги. Внешний 5432 закрыт ufw, открыт только для IP GitHub Actions.
+
+**Enrich-воркер дат публикации** (`src/enrich/`):
+- Новое поле `Order.publishedAt DateTime? @db.Timestamptz(6)` (миграция `20260513120000_add_published_at`).
+- `enrichOrders(storage, 20)` запускается после основного цикла в `try/catch`. Открывает Playwright и идёт по 4 источникам:
+  - **HH** — JSON-LD `JobPosting.datePosted`
+  - **FL** — `.fl-project-content` regex
+  - **Freelance.ru** — `<table><tr><td>Дата публикации:</td>` (большинство FR-заказов получают дату ещё в парсере списка через `time.timeago[datetime]`)
+  - **Kwork** — TTL-эвристика (`KWORK_ENRICH_TTL_HOURS`, дефолт 48ч), потому что Kwork не отдаёт дату публикации в DOM
+- Карта подсистемы — [docs/enrich-published-at.md](enrich-published-at.md).
+
+**Ревью** (`c9a27df`, `5b651d8`):
+- **C1** Миграция `20260513120000_add_published_at` создана, шаг `prisma migrate deploy` добавлен в workflow. На проде помечена `migrate resolve --applied` (колонка была добавлена вручную).
+- **C2** `getOrdersWithoutPublishedAt` сужен: cutoff 7 дней + `status='new'` + `blacklisted=false` — заказы без даты не залипают в выборке.
+- **C3** Kwork regex чинён: `Осталось: 1 д. 23 ч.` (текущий формат) **не матчил** старым regex `ч.X мин.` — для большинства Kwork-заказов функция возвращала `null` молча. Теперь поддержаны оба формата, TTL в конфиге, warn-логи на сбоях парсинга.
+- **C4** `markProcessed` валидирует publishedAt через `Number.isNaN(d.getTime())` — кривая ISO-строка из meta больше не валит upsert.
+- Заодно: `page: Page` вместо `any`, JSON-LD HH фильтрует по `@type='JobPosting'` (раньше брал первый script).
+
+**Dashboard** (`5b651d8`):
+- `Order.published_at` в `lib/db.ts` + `serializeOrder`.
+- `OrderCard`: `📅 опубл. <дата>` при наличии, иначе `created_at` без префикса.
+- MD-экспорт: поле `**Опубликован:**` при наличии `publishedAt`, иначе `**Дата:**`.
+
+**Проверено end-to-end:**
+- `npm run lint` (root + dashboard) — зелёные.
+- `_prisma_migrations` на проде содержит `20260513120000_add_published_at`.
+- `GET /api/orders` отдаёт `published_at` после деплоя (5b651d8).
+- В `OrderCard` дата публикации видна (визуальная проверка пользователем).
+
+**Дрейф типа (важно):**
+- `published_at` в проде создан как `timestamptz(6)`, остальные datetime-колонки `orders` — `timestamp(3) without time zone` (Prisma default). Schema `@db.Timestamptz(6)` соответствует факту. При генерации новых datetime-полей через миграцию — учитывать дефолт Prisma.
+
+---
+
 ## 2026-05-11 — Мусор → status='skipped', дефолт фильтра «Любой балл»
 
 Откат костыля из `558dc5f` (см. ниже). Дефолт `minScore=7` на главной заодно прятал легитимные заказы 5–6/10 на вкладке «Все» — корень был не в UI, а в том, что мусор писался в БД со `status='new'`.
