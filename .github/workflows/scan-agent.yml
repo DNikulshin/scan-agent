@@ -2,17 +2,27 @@ name: ScanAgent
 
 on:
   schedule:
-    # ── Пиковые часы 07:00–10:00 МСК (04:00–07:00 UTC), каждые 30 мин ──
+    # GitHub Actions cron всегда UTC. МСК = UTC+3.
+    # ── Утренний пик: 04:00–06:30 UTC = 07:00–09:30 МСК, каждые 30 мин (6 запусков) ──
     - cron: "0,30 4,5,6 * * *"
-    # ── Пиковые часы 17:00–20:00 МСК (14:00–17:00 UTC), каждые 30 мин ──
+    # ── Вечерний пик: 14:00–16:30 UTC = 17:00–19:30 МСК, каждые 30 мин (6 запусков) ──
     - cron: "0,30 14,15,16 * * *"
-    # ── Внепиковые часы, раз в 2 часа ──
+    # ── Внепик: 00,02,08,10,12,18,20,22 UTC = 03,05,11,13,15,21,23,01 МСК (8 запусков) ──
     - cron: "0 0,2,8,10,12,18,20,22 * * *"
   workflow_dispatch: # ручной запуск из GitHub UI
+
+# Гонка прогонов исключается: если предыдущий запуск ещё работает —
+# новый ждёт в очереди (cancel-in-progress=false: не прерывать скрапинг посередине).
+concurrency:
+  group: scan-agent-run
+  cancel-in-progress: false
 
 jobs:
   run-agent:
     runs-on: ubuntu-latest
+    # p90 прогона ~5 мин; 25 мин — потолок < cron-интервала 30 мин,
+    # чтобы зависший прогон не сжигал Actions-минуты до дефолтных 360.
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -23,14 +33,6 @@ jobs:
         with:
           node-version: "20"
           cache: "npm"
-
-      # - name: Restore DB cache
-      #   uses: actions/cache/restore@v4
-      #   with:
-      #     path: agent.db
-      #     key: agent-db-${{ github.run_id }}
-      #     restore-keys: |
-      #       agent-db-
 
       - name: Install dependencies
         run: npm ci
@@ -44,6 +46,12 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: npx prisma migrate deploy
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
 
       - name: Install Playwright browsers
         run: npx playwright install chromium --with-deps
@@ -85,19 +93,3 @@ jobs:
           KWORK_PROFILE_URL: ${{ vars.KWORK_PROFILE_URL }}
           FREELANCERU_PROFILE_URL: ${{ vars.FREELANCERU_PROFILE_URL }}
         run: npx tsx src/index.ts
-
-      # - name: Upload agent.db for analysis
-      #   if: always()
-      #   uses: actions/upload-artifact@v4
-      #   with:
-      #     name: agent-db-snapshot
-      #     path: agent.db
-      #     retention-days: 7
-      #     if-no-files-found: warn
-
-      # - name: Save DB cache
-      #   if: always()
-      #   uses: actions/cache/save@v4
-      #   with:
-      #     path: agent.db
-      #     key: agent-db-${{ github.run_id }}
