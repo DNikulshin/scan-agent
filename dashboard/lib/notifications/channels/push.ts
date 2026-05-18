@@ -8,7 +8,6 @@
 //   timeout/net → RetryableError
 
 import webpush from "web-push";
-import { HttpsProxyAgent } from "https-proxy-agent";
 
 import { prisma } from "@/lib/db";
 import { FatalError, RetryableError } from "../errors";
@@ -59,8 +58,9 @@ export async function sendPush(
   }
   const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
   if (proxyUrl) {
+    // web-push принимает proxy как строку и сам создаёт HttpsProxyAgent
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (options as any).agent = new HttpsProxyAgent(proxyUrl);
+    (options as any).proxy = proxyUrl;
   }
 
   try {

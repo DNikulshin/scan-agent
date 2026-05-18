@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.96.2",
-    "https-proxy-agent": "^9.0.0",
     "next": "16.2.2",
     "pg": "^8.20.0",
     "react": "19.2.4",

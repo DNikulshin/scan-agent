@@ -8,7 +8,11 @@
 //   429  → RetryableError(retry_after) — Telegram прислал rate-limit
 //   5xx  → RetryableError (временный сбой)
 //   4xx  → FatalError (битый payload, неверный токен и т.п.)
+//
+// Используем undici.fetch() с явным ProxyAgent, потому что Node.js 20
+// встроенный fetch не подхватывает setGlobalDispatcher из npm-пакета undici.
 
+import { fetch as undiciFetch, ProxyAgent } from "undici";
 import { FatalError, RetryableError } from "../errors";
 
 interface TelegramPayload {
@@ -16,6 +20,14 @@ interface TelegramPayload {
   parse_mode?: "HTML" | "MarkdownV2" | "Markdown";
   link_preview_options?: { is_disabled?: boolean };
   reply_markup?: unknown;
+}
+
+let proxyDispatcher: ProxyAgent | undefined;
+function getDispatcher(): ProxyAgent | undefined {
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (!proxyUrl) return undefined;
+  if (!proxyDispatcher) proxyDispatcher = new ProxyAgent(proxyUrl);
+  return proxyDispatcher;
 }
 
 export async function sendTelegram(payload: TelegramPayload): Promise<void> {
@@ -28,12 +40,14 @@ export async function sendTelegram(payload: TelegramPayload): Promise<void> {
   const url = `https://api.telegram.org/bot${token}/sendMessage`;
   const body = { chat_id: chatId, ...payload };
 
-  let res: Response;
+  let res: Awaited<ReturnType<typeof undiciFetch>>;
   try {
-    res = await fetch(url, {
+    res = await undiciFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      dispatcher: getDispatcher() as any,
     });
   } catch (err) {
     // Сетевая ошибка / DNS / timeout — ретраим.
