@@ -8,6 +8,7 @@
 //   timeout/net → RetryableError
 
 import webpush from "web-push";
+import { HttpsProxyAgent } from "https-proxy-agent";
 
 import { prisma } from "@/lib/db";
 import { FatalError, RetryableError } from "../errors";
@@ -55,6 +56,11 @@ export async function sendPush(
     // topic должен быть base64url, ≤32 символа. uuid с дефисами длиной 36 — сократим.
     const topic = orderId.replace(/-/g, "").slice(0, 32);
     (options.headers as Record<string, string>).Topic = topic;
+  }
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (proxyUrl) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (options as any).agent = new HttpsProxyAgent(proxyUrl);
   }
 
   try {

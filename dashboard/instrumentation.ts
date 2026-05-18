@@ -11,6 +11,15 @@ export async function register(): Promise<void> {
     return;
   }
 
+  // Если в окружении задан прокси (HTTPS_PROXY/HTTP_PROXY) — применяем глобально
+  // для всех fetch-вызовов (Telegram Bot API и т.д.). Не затрагивает pg/Prisma (TCP).
+  const proxyUrl = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+  if (proxyUrl) {
+    const { ProxyAgent, setGlobalDispatcher } = await import("undici");
+    setGlobalDispatcher(new ProxyAgent(proxyUrl));
+    console.log(`[instrumentation] fetch proxy configured: ${proxyUrl}`);
+  }
+
   const { startDispatcher } = await import("./lib/notifications/dispatcher");
   startDispatcher();
 }

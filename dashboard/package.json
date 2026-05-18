@@ -14,11 +14,13 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.96.2",
+    "https-proxy-agent": "^9.0.0",
     "next": "16.2.2",
     "pg": "^8.20.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
+    "undici": "^7.25.0",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
