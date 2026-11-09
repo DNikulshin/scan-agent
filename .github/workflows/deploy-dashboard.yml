@@ -39,12 +39,3 @@ jobs:
           tags: ghcr.io/dnikulshin/scan-agent/dashboard:latest
           cache-from: type=gha          # кеш слоёв между запусками — бесплатно
           cache-to: type=gha,mode=max
-
-      - name: Trigger deploy on VPS
-        env:
-          WEBHOOK_SECRET: ${{ secrets.WEBHOOK_SECRET_SCAN_AGENT }}
-        run: |
-          curl -f -X POST https://webhook.nikulshin-dev.online/hooks/deploy-scan-agent \
-            -H "Content-Type: application/json" \
-            -H "Authorization: $WEBHOOK_SECRET" \
-            -d '{"ref":"refs/heads/main"}'
