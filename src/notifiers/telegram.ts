@@ -1,4 +1,4 @@
-import TelegramBot from "node-telegram-bot-api";
+import { Bot } from "grammy";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import type {
@@ -16,17 +16,17 @@ import {
 
 export class TelegramNotifier implements Notifier {
   name = "telegram";
-  private bot: TelegramBot;
+  private bot: Bot;
   private storage: Storage | null;
 
   constructor(storage?: Storage) {
-    this.bot = new TelegramBot(config.telegram.botToken, { polling: false });
+    this.bot = new Bot(config.telegram.botToken);
     this.storage = storage ?? null;
   }
 
   async send(scored: ScoredOrder): Promise<void> {
     const msg = buildOrderMessage(scored);
-    await this.bot.sendMessage(config.telegram.chatId, msg.text, {
+    await this.bot.api.sendMessage(config.telegram.chatId, msg.text, {
       parse_mode: msg.parse_mode,
       link_preview_options: msg.link_preview_options,
       reply_markup: msg.reply_markup,
@@ -43,7 +43,7 @@ export class TelegramNotifier implements Notifier {
 
   async sendReminder(order: ReminderOrder): Promise<void> {
     const msg = buildReminderMessage(order);
-    await this.bot.sendMessage(config.telegram.chatId, msg.text, {
+    await this.bot.api.sendMessage(config.telegram.chatId, msg.text, {
       parse_mode: msg.parse_mode,
       link_preview_options: msg.link_preview_options,
       reply_markup: msg.reply_markup,
@@ -60,38 +60,35 @@ export class TelegramNotifier implements Notifier {
       return;
     }
 
-    this.bot.startPolling({ restart: true });
+    this.bot.catch((err) => {
+      logger.error({ err: err.error }, "Ошибка Telegram-бота");
+    });
 
-    this.bot.on("message", async (msg) => {
-      if (!this.storage) return;
-      const text = msg.text?.trim() ?? "";
-      if (!text.startsWith("/")) return;
+    this.bot.on("message:text", async (ctx) => {
+      const storage = this.storage;
+      const text = ctx.message.text.trim();
+      if (!storage || !text.startsWith("/")) return;
+      const chatId = config.telegram.chatId;
 
       try {
-        const storage = this.storage;
-
         if (text === "/stats") {
           const settings = await storage.getSettings();
           const stats = await storage.getStats(settings.minScore);
-          await this.bot.sendMessage(
-            config.telegram.chatId,
-            formatStats(stats),
-            { parse_mode: "HTML" },
-          );
+          await this.bot.api.sendMessage(chatId, formatStats(stats), {
+            parse_mode: "HTML",
+          });
         } else if (text === "/settings") {
           const settings = await storage.getSettings();
-          await this.bot.sendMessage(
-            config.telegram.chatId,
-            formatSettings(settings),
-            { parse_mode: "HTML" },
-          );
+          await this.bot.api.sendMessage(chatId, formatSettings(settings), {
+            parse_mode: "HTML",
+          });
         } else if (text.startsWith("/setrate ")) {
           const val = parseInt(text.slice(9).trim(), 10);
           if (isNaN(val) || val < 0)
             throw new Error("Неверное значение. Пример: /setrate 2000");
           await storage.setSetting("minPrice", String(val));
-          await this.bot.sendMessage(
-            config.telegram.chatId,
+          await this.bot.api.sendMessage(
+            chatId,
             `✅ Мин. бюджет: <b>${val}₽</b>`,
             { parse_mode: "HTML" },
           );
@@ -100,8 +97,8 @@ export class TelegramNotifier implements Notifier {
           if (isNaN(val) || val < 0 || val > 10)
             throw new Error("Неверное значение (0–10). Пример: /setscore 7");
           await storage.setSetting("minScore", String(val));
-          await this.bot.sendMessage(
-            config.telegram.chatId,
+          await this.bot.api.sendMessage(
+            chatId,
             `✅ Мин. балл: <b>${val}/10</b>`,
             { parse_mode: "HTML" },
           );
@@ -110,8 +107,8 @@ export class TelegramNotifier implements Notifier {
           const list = stopWords
             .map((w, i) => `${i + 1}. ${esc(w)}`)
             .join("\n");
-          await this.bot.sendMessage(
-            config.telegram.chatId,
+          await this.bot.api.sendMessage(
+            chatId,
             `🚫 <b>Стоп-слова:</b>\n${list || "(список пуст)"}`,
             { parse_mode: "HTML" },
           );
@@ -127,8 +124,8 @@ export class TelegramNotifier implements Notifier {
               JSON.stringify(settings.stopWords),
             );
           }
-          await this.bot.sendMessage(
-            config.telegram.chatId,
+          await this.bot.api.sendMessage(
+            chatId,
             `✅ Стоп-слово добавлено: <b>${esc(word)}</b>`,
             { parse_mode: "HTML" },
           );
@@ -142,8 +139,8 @@ export class TelegramNotifier implements Notifier {
             "stopWords",
             JSON.stringify(settings.stopWords),
           );
-          await this.bot.sendMessage(
-            config.telegram.chatId,
+          await this.bot.api.sendMessage(
+            chatId,
             `✅ Стоп-слово удалено: <b>${esc(word)}</b>`,
             { parse_mode: "HTML" },
           );
@@ -151,16 +148,17 @@ export class TelegramNotifier implements Notifier {
       } catch (err) {
         const errMsg =
           err instanceof Error ? err.message : "Неизвестная ошибка";
-        await this.bot
-          .sendMessage(config.telegram.chatId, `❌ ${esc(errMsg)}`)
+        await this.bot.api
+          .sendMessage(chatId, `❌ ${esc(errMsg)}`)
           .catch(() => {});
         logger.error({ err, text }, "Ошибка обработки команды");
       }
     });
 
-    this.bot.on("callback_query", async (query) => {
-      const data = query.data;
-      if (!data) return;
+    this.bot.on("callback_query:data", async (ctx) => {
+      const storage = this.storage;
+      const data = ctx.callbackQuery.data;
+      if (!storage || !data) return;
 
       const parts = data.split(":");
       if (parts.length < 3) return;
@@ -169,49 +167,38 @@ export class TelegramNotifier implements Notifier {
 
       if (action === "skip") {
         try {
-          await this.storage!.blacklist(orderId, source);
-          await this.bot.answerCallbackQuery(query.id, {
-            text: "✅ Добавлен в blacklist",
-          });
+          await storage.blacklist(orderId, source);
+          await ctx.answerCallbackQuery({ text: "✅ Добавлен в blacklist" });
 
-          if (query.message) {
-            const original = query.message.text ?? "";
-            await this.bot
-              .editMessageText(original + "\n\n❌ Пропущен", {
-                chat_id: query.message.chat.id,
-                message_id: query.message.message_id,
-              })
+          if (ctx.callbackQuery.message) {
+            const original = ctx.callbackQuery.message.text ?? "";
+            await ctx
+              .editMessageText(original + "\n\n❌ Пропущен")
               .catch(() => {});
           }
         } catch (err) {
           logger.error({ err, orderId, source }, "Ошибка обработки skip");
-          await this.bot
-            .answerCallbackQuery(query.id, { text: "❌ Ошибка" })
+          await ctx
+            .answerCallbackQuery({ text: "❌ Ошибка" })
             .catch(() => {});
         }
       } else if (action === "pick1" || action === "pick2") {
         try {
           const variant = action === "pick1" ? "a" : "b";
-          await this.storage!.choosePitch(orderId, source, variant);
+          await storage.choosePitch(orderId, source, variant);
 
           const label = action === "pick1" ? "Вариант 1" : "Вариант 2";
-          await this.bot.answerCallbackQuery(query.id, {
-            text: `✅ Выбран ${label}`,
-          });
+          await ctx.answerCallbackQuery({ text: `✅ Выбран ${label}` });
 
-          if (query.message) {
-            await this.bot
-              .editMessageReplyMarkup(
-                {
+          if (ctx.callbackQuery.message) {
+            await ctx
+              .editMessageReplyMarkup({
+                reply_markup: {
                   inline_keyboard: [
                     [{ text: `✅ Выбран ${label}`, callback_data: "noop" }],
                   ],
                 },
-                {
-                  chat_id: query.message.chat.id,
-                  message_id: query.message.message_id,
-                },
-              )
+              })
               .catch(() => {});
           }
         } catch (err) {
@@ -219,18 +206,21 @@ export class TelegramNotifier implements Notifier {
             { err, orderId, source, action },
             "Ошибка обработки pick",
           );
-          await this.bot
-            .answerCallbackQuery(query.id, { text: "❌ Ошибка" })
+          await ctx
+            .answerCallbackQuery({ text: "❌ Ошибка" })
             .catch(() => {});
         }
       }
     });
 
+    void this.bot
+      .start({ drop_pending_updates: false })
+      .catch((err) => logger.error({ err }, "Telegram polling остановлен"));
     logger.info("Telegram callback listener запущен");
   }
 
   stopCallbackListener(): void {
-    this.bot.stopPolling();
+    this.bot.stop();
   }
 }
 
